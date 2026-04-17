@@ -5,11 +5,7 @@
 #include <thread>
 #include <optional>
 #include <atomic>
-
-// ============ UTILITIES (Cache alignment) ============
-namespace lockfree {
-    constexpr size_t CACHE_LINE_SIZE = 64;
-}
+#include "lockfree/pool.hpp"
 
 // ============ SPSC QUEUE IMPLEMENTATION ============
 namespace lockfree {
@@ -71,6 +67,12 @@ struct TestCase {
     std::function<bool()> func;
 };
 
+struct TestObject {
+    int value;
+    TestObject() : value(67) {}
+    explicit TestObject(int v) : value(v) {}
+};
+
 std::vector<TestCase>& get_tests() {
     static std::vector<TestCase> tests;
     return tests;
@@ -101,12 +103,12 @@ std::vector<TestCase>& get_tests() {
 TEST_CASE(test_spsc_basic) {
     lockfree::SPSCQueue<int, 16> queue;
     
-    ASSERT(queue.push(42));
+    ASSERT(queue.push(99));
     ASSERT(queue.push(100));
     
     auto val = queue.pop();
     ASSERT(val.has_value());
-    ASSERT_EQ(*val, 42);
+    ASSERT_EQ(*val, 99);
     
     val = queue.pop();
     ASSERT(val.has_value());
@@ -174,6 +176,77 @@ TEST_CASE(test_spsc_threaded) {
     consumer.join();
     
     ASSERT_EQ(received, NUM_ITEMS);
+    return true;
+}
+
+TEST_CASE(test_pool_basic) {
+    lockfree::ObjectPool<TestObject, 100> pool;
+
+    auto obj = pool.acquire();
+    ASSERT(obj);
+    ASSERT_EQ(obj->value, 67);
+    ASSERT_EQ(pool.used_count(), 1);
+    ASSERT_EQ(pool.free_count(), 99);
+
+    return true;
+}
+
+TEST_CASE(test_pool_multiple) {
+    lockfree::ObjectPool<TestObject, 10> pool;
+    
+    std::vector<decltype(pool.acquire())> objects;
+    for (int i = 0; i < 10; i++) {
+        auto obj = pool.acquire();
+        ASSERT(obj);
+        objects.push_back(std::move(obj));
+    }
+    
+    // Pool should be empty
+    auto empty = pool.acquire();
+    ASSERT(!empty);
+    ASSERT_EQ(pool.used_count(), 10);
+    ASSERT_EQ(pool.free_count(), 0);
+    
+    // Release one
+    objects.pop_back();
+    ASSERT_EQ(pool.used_count(), 9);
+    ASSERT_EQ(pool.free_count(), 1);
+    
+    // Acquire should work again
+    auto new_obj = pool.acquire();
+    ASSERT(new_obj);
+    
+    return true;
+}
+
+TEST_CASE(test_pool_auto_release) {
+    lockfree::ObjectPool<TestObject, 10> pool;
+    
+    {
+        auto obj = pool.acquire();
+        ASSERT(obj);
+        ASSERT_EQ(pool.used_count(), 1);
+        // obj goes out of scope here
+    }
+    
+    ASSERT_EQ(pool.used_count(), 0);
+    ASSERT_EQ(pool.free_count(), 10);
+    
+    return true;
+}
+
+TEST_CASE(test_pool_move_semantics) {
+    lockfree::ObjectPool<TestObject, 10> pool;
+    
+    auto obj1 = pool.acquire();
+    ASSERT(obj1);
+    ASSERT_EQ(pool.used_count(), 1);
+    
+    auto obj2 = std::move(obj1);
+    ASSERT(!obj1);  // obj1 is now empty
+    ASSERT(obj2);   // obj2 has the object
+    ASSERT_EQ(pool.used_count(), 1);  // Still only 1 object in use
+    
     return true;
 }
 

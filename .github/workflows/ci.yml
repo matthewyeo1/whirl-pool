@@ -18,8 +18,37 @@ jobs:
     - name: Build
       run: cmake --build build_ci --config Release
     
-    - name: Test
-      run: ./build_ci/tests
+    - name: Run SPSC tests
+      run: |
+        ./build_ci/tests --gtest_filter="test_spsc_*"
+    
+    - name: Run Pool tests
+      run: |
+        ./build_ci/tests --gtest_filter="test_pool_*"
+    
+    - name: Run Stack tests
+      run: |
+        ./build_ci/tests --gtest_filter="test_stack_*"
+    
+    - name: Run MPMC basic
+      run: |
+        ./build_ci/tests --gtest_filter="test_mpmc_basic"
+    
+    - name: Run MPMC empty
+      run: |
+        ./build_ci/tests --gtest_filter="test_mpmc_empty"
+    
+    - name: Run MPMC single producer single consumer
+      run: |
+        ./build_ci/tests --gtest_filter="test_mpmc_single_producer_single_consumer"
+    
+    - name: Run MPMC multi producer single consumer
+      run: |
+        ./build_ci/tests --gtest_filter="test_mpmc_multi_producer_single_consumer"
+    
+    - name: Run MPMC multi producer multi consumer
+      run: |
+        ./build_ci/tests --gtest_filter="test_mpmc_multi_producer_multi_consumer"
 
   test-windows:
     runs-on: windows-latest
@@ -32,5 +61,26 @@ jobs:
     - name: Build
       run: cmake --build build_ci --config Release
     
-    - name: Test
-      run: ./build_ci/Release/tests.exe
+    - name: Run SPSC tests
+      run: ./build_ci/Release/tests.exe --gtest_filter="test_spsc_*"
+    
+    - name: Run Pool tests
+      run: ./build_ci/Release/tests.exe --gtest_filter="test_pool_*"
+    
+    - name: Run Stack tests
+      run: ./build_ci/Release/tests.exe --gtest_filter="test_stack_*"
+    
+    - name: Run MPMC basic
+      run: ./build_ci/Release/tests.exe --gtest_filter="test_mpmc_basic"
+    
+    - name: Run MPMC empty
+      run: ./build_ci/Release/tests.exe --gtest_filter="test_mpmc_empty"
+    
+    - name: Run MPMC single producer single consumer
+      run: ./build_ci/Release/tests.exe --gtest_filter="test_mpmc_single_producer_single_consumer"
+    
+    - name: Run MPMC multi producer single consumer
+      run: ./build_ci/Release/tests.exe --gtest_filter="test_mpmc_multi_producer_single_consumer"
+    
+    - name: Run MPMC multi producer multi consumer
+      run: ./build_ci/Release/tests.exe --gtest_filter="test_mpmc_multi_producer_multi_consumer"

@@ -198,7 +198,7 @@ public:
                 continue;  
             }
 
-            Node* next = old_head->next.load(std::memory_order_relaxed);
+            Node* next = old_head->next.load(std::memory_order_acquire);
 
             if (m_head.compare_exchange_weak(old_head, next,
                 std::memory_order_release, std::memory_order_relaxed)) {

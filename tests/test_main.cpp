@@ -370,7 +370,7 @@ TEST_CASE(test_stack_basic) {
     
     auto val = stack.pop();
     ASSERT(val.has_value());
-    ASSERT_EQ(*val, 100);  // LIFO: last in, first out
+    ASSERT_EQ(*val, 100);  
     
     val = stack.pop();
     ASSERT(val.has_value());

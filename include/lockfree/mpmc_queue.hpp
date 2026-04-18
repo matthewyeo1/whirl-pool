@@ -197,7 +197,7 @@ public:
 
 template<typename T>
 std::array<typename MPMCQueue<T>::HazardPointer, MPMCQueue<T>::MAX_HAZARD_POINTERS>
-    MPMCQueue<T>::h_ptrs;
+    MPMCQueue<T>::h_ptrs{};
 
 template<typename T>
 thread_local std::vector<typename MPMCQueue<T>::Node*> MPMCQueue<T>::retired_nodes;

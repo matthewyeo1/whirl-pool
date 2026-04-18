@@ -231,7 +231,7 @@ public:
 
 template<typename T>
 std::array<typename TStack<T>::HazardPointer, TStack<T>::MAX_HAZARD_POINTERS> 
-    TStack<T>::h_ptrs;
+    TStack<T>::h_ptrs{};
 
 template<typename T>
 thread_local std::vector<typename TStack<T>::Node*> TStack<T>::retired_nodes;

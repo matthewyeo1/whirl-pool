@@ -38,7 +38,7 @@ private:
         HazardPointer() : owner(std::thread::id()), pointer(nullptr) {}
     };
 
-    static constexpr int MAX_HAZARD_POINTERS = 128;
+    static constexpr int MAX_HAZARD_POINTERS = 256;
     static std::array<HazardPointer, MAX_HAZARD_POINTERS> h_ptrs;
     static thread_local std::vector<Node*> retired_nodes;
     static thread_local HazardPointer* local_hp;

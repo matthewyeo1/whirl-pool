@@ -192,6 +192,9 @@ public:
 
             // Double-check head hasn't changed
             if (m_head.load(std::memory_order_acquire) != old_head) {
+
+                // Clear before retry
+                h_ptr->pointer.store(nullptr, std::memory_order_release);
                 continue;  
             }
 
@@ -209,6 +212,9 @@ public:
                 h_ptr->pointer.store(nullptr, std::memory_order_release);
                 return value;
             }
+
+            // Also clear if CAS fails
+            h_ptr->pointer.store(nullptr, std::memory_order_release);
         }
     }
 

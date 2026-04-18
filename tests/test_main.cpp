@@ -5,63 +5,7 @@
 #include <thread>
 #include <optional>
 #include <atomic>
-#include "lockfree/pool.hpp"
-#include "lockfree/mpmc_queue.hpp"
-#include "lockfree/stack.hpp"
-
-// ============ SPSC QUEUE IMPLEMENTATION ============
-namespace lockfree {
-
-template<typename T, size_t Capacity>
-class SPSCQueue {
-    static_assert((Capacity & (Capacity - 1)) == 0, "Capacity must be power of 2");
-    
-public:
-    SPSCQueue() : m_head(0), m_tail(0) {}
-    
-    bool push(const T& value) {
-        size_t head = m_head.load(std::memory_order_relaxed);
-        size_t next_head = (head + 1) & (Capacity - 1);
-        
-        if (next_head == m_tail.load(std::memory_order_acquire)) {
-            return false;
-        }
-        
-        m_buffer[head] = value;
-        m_head.store(next_head, std::memory_order_release);
-        return true;
-    }
-    
-    std::optional<T> pop() {
-        size_t tail = m_tail.load(std::memory_order_relaxed);
-        
-        if (tail == m_head.load(std::memory_order_acquire)) {
-            return std::nullopt;
-        }
-        
-        T value = std::move(m_buffer[tail]);
-        m_tail.store((tail + 1) & (Capacity - 1), std::memory_order_release);
-        return value;
-    }
-    
-    bool empty() const {
-        return m_head.load(std::memory_order_acquire) == 
-               m_tail.load(std::memory_order_acquire);
-    }
-    
-    size_t size() const {
-        size_t head = m_head.load(std::memory_order_acquire);
-        size_t tail = m_tail.load(std::memory_order_acquire);
-        return (head - tail) & (Capacity - 1);
-    }
-    
-private:
-    alignas(lockfree::CACHE_LINE_SIZE) std::atomic<size_t> m_head;
-    alignas(lockfree::CACHE_LINE_SIZE) std::atomic<size_t> m_tail;
-    T m_buffer[Capacity];
-};
-
-}
+#include "lockfree.h"
 
 // ============ TEST FRAMEWORK ============
 struct TestCase {
@@ -271,9 +215,6 @@ TEST_CASE(test_mpmc_basic) {
     return true;
 }
 
-// Due to the non-deterministic nature of MPMC queues & Treiber stacks, 
-// these tests can be flaky in CI environments.
-#ifndef CI_BUILD
 TEST_CASE(test_mpmc_single_producer_single_consumer) {
     lockfree::MPMCQueue<int> queue;
     const int NUM_ITEMS = 50000;
@@ -307,7 +248,7 @@ TEST_CASE(test_mpmc_multi_producer_single_consumer) {
     const int ITEMS_PER_PRODUCER = 10000;
     const int TOTAL_ITEMS = NUM_PRODUCERS * ITEMS_PER_PRODUCER;
     std::atomic<int> consumed{0};
-    std::atomic<int> producers_finished{0};
+    std::atomic<bool> producers_done{false};  // ← Add this
     
     std::vector<std::thread> producers;
     for (int i = 0; i < NUM_PRODUCERS; i++) {
@@ -315,24 +256,34 @@ TEST_CASE(test_mpmc_multi_producer_single_consumer) {
             for (int j = 0; j < ITEMS_PER_PRODUCER; j++) {
                 queue.push(j);
             }
-            producers_finished++;
         });
     }
     
     std::thread consumer([&]() {
-        while (consumed < TOTAL_ITEMS) {
+        while (true) {
             auto val = queue.pop();
             if (val.has_value()) {
                 consumed++;
             }
+            
+            // Exit condition: all producers done AND consumed all items
+            if (producers_done.load() && consumed.load() >= TOTAL_ITEMS) {
+                break;
+            }
+            
+            // Small backoff to prevent CPU spinning when empty
+            if (!val.has_value()) {
+                std::this_thread::yield();
+            }
         }
-        return;
     });
     
     for (auto& t : producers) t.join();
+    producers_done = true;  // ← Signal consumers
+    
     consumer.join();
     
-    ASSERT_EQ(consumed, TOTAL_ITEMS);
+    ASSERT_EQ(consumed.load(), TOTAL_ITEMS);
     return true;
 }
 
@@ -442,6 +393,7 @@ TEST_CASE(test_stack_multi_producer_multi_consumer) {
     const int ITEMS_PER_PRODUCER = 5000;
     const int TOTAL_ITEMS = NUM_PRODUCERS * ITEMS_PER_PRODUCER;
     
+    std::atomic<int> produced{0};
     std::atomic<int> consumed{0};
     
     std::vector<std::thread> producers;
@@ -449,6 +401,7 @@ TEST_CASE(test_stack_multi_producer_multi_consumer) {
         producers.emplace_back([&]() {
             for (int j = 0; j < ITEMS_PER_PRODUCER; j++) {
                 stack.push(j);
+                produced++;
             }
         });
     }
@@ -460,6 +413,10 @@ TEST_CASE(test_stack_multi_producer_multi_consumer) {
                 auto val = stack.pop();
                 if (val.has_value()) {
                     consumed++;
+                } else {
+                    if (produced.load() < NUM_PRODUCERS) {
+                        std::this_thread::yield();
+                    }
                 }
             }
         });
@@ -484,7 +441,6 @@ TEST_CASE(test_stack_empty) {
     
     return true;
 }
-#endif
 
 // ============ MAIN ============
 int main() {

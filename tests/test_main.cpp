@@ -6,6 +6,7 @@
 #include <optional>
 #include <atomic>
 #include "lockfree/pool.hpp"
+#include "lockfree/mpmc_queue.hpp"
 
 // ============ SPSC QUEUE IMPLEMENTATION ============
 namespace lockfree {
@@ -100,6 +101,77 @@ std::vector<TestCase>& get_tests() {
 
 // ============ TESTS ============
 
+TEST_CASE(test_pool_basic) {
+    lockfree::ObjectPool<TestObject, 100> pool;
+
+    auto obj = pool.acquire();
+    ASSERT(obj);
+    ASSERT_EQ(obj->value, 67);
+    ASSERT_EQ(pool.used_count(), 1);
+    ASSERT_EQ(pool.free_count(), 99);
+
+    return true;
+}
+
+TEST_CASE(test_pool_multiple) {
+    lockfree::ObjectPool<TestObject, 10> pool;
+    
+    std::vector<decltype(pool.acquire())> objects;
+    for (int i = 0; i < 10; i++) {
+        auto obj = pool.acquire();
+        ASSERT(obj);
+        objects.push_back(std::move(obj));
+    }
+    
+    // Pool should be empty
+    auto empty = pool.acquire();
+    ASSERT(!empty);
+    ASSERT_EQ(pool.used_count(), 10);
+    ASSERT_EQ(pool.free_count(), 0);
+    
+    // Release one
+    objects.pop_back();
+    ASSERT_EQ(pool.used_count(), 9);
+    ASSERT_EQ(pool.free_count(), 1);
+    
+    // Acquire should work again
+    auto new_obj = pool.acquire();
+    ASSERT(new_obj);
+    
+    return true;
+}
+
+TEST_CASE(test_pool_auto_release) {
+    lockfree::ObjectPool<TestObject, 10> pool;
+    
+    {
+        auto obj = pool.acquire();
+        ASSERT(obj);
+        ASSERT_EQ(pool.used_count(), 1);
+        // obj goes out of scope here
+    }
+    
+    ASSERT_EQ(pool.used_count(), 0);
+    ASSERT_EQ(pool.free_count(), 10);
+    
+    return true;
+}
+
+TEST_CASE(test_pool_move_semantics) {
+    lockfree::ObjectPool<TestObject, 10> pool;
+    
+    auto obj1 = pool.acquire();
+    ASSERT(obj1);
+    ASSERT_EQ(pool.used_count(), 1);
+    
+    auto obj2 = std::move(obj1);
+    ASSERT(!obj1);  // obj1 is now empty
+    ASSERT(obj2);   // obj2 has the object
+    ASSERT_EQ(pool.used_count(), 1);  // Still only 1 object in use
+    
+    return true;
+}
+
 TEST_CASE(test_spsc_basic) {
     lockfree::SPSCQueue<int, 16> queue;
     
@@ -179,73 +251,135 @@ TEST_CASE(test_spsc_threaded) {
     return true;
 }
 
-TEST_CASE(test_pool_basic) {
-    lockfree::ObjectPool<TestObject, 100> pool;
-
-    auto obj = pool.acquire();
-    ASSERT(obj);
-    ASSERT_EQ(obj->value, 67);
-    ASSERT_EQ(pool.used_count(), 1);
-    ASSERT_EQ(pool.free_count(), 99);
-
+TEST_CASE(test_mpmc_basic) {
+    lockfree::MPMCQueue<int> queue;
+    
+    queue.push(67);
+    queue.push(100);
+    
+    auto val = queue.pop();
+    ASSERT(val.has_value());
+    ASSERT_EQ(*val, 67);
+    
+    val = queue.pop();
+    ASSERT(val.has_value());
+    ASSERT_EQ(*val, 100);
+    
+    ASSERT(!queue.pop().has_value());
     return true;
 }
 
-TEST_CASE(test_pool_multiple) {
-    lockfree::ObjectPool<TestObject, 10> pool;
+TEST_CASE(test_mpmc_single_producer_single_consumer) {
+    lockfree::MPMCQueue<int> queue;
+    const int NUM_ITEMS = 50000;
     
-    std::vector<decltype(pool.acquire())> objects;
-    for (int i = 0; i < 10; i++) {
-        auto obj = pool.acquire();
-        ASSERT(obj);
-        objects.push_back(std::move(obj));
+    std::thread producer([&]() {
+        for (int i = 0; i < NUM_ITEMS; i++) {
+            queue.push(i);
+        }
+    });
+    
+    std::thread consumer([&]() {
+        int received = 0;
+        while (received < NUM_ITEMS) {
+            auto val = queue.pop();
+            if (val.has_value()) {
+                received++;
+            }
+        }
+        ASSERT_EQ(received, NUM_ITEMS);
+    });
+    
+    producer.join();
+    consumer.join();
+    
+    return true;
+}
+
+TEST_CASE(test_mpmc_multi_producer_single_consumer) {
+    lockfree::MPMCQueue<int> queue;
+    const int NUM_PRODUCERS = 4;
+    const int ITEMS_PER_PRODUCER = 10000;
+    const int TOTAL_ITEMS = NUM_PRODUCERS * ITEMS_PER_PRODUCER;
+    std::atomic<int> consumed{0};
+    std::atomic<int> producers_finished{0};
+    
+    std::vector<std::thread> producers;
+    for (int i = 0; i < NUM_PRODUCERS; i++) {
+        producers.emplace_back([&]() {
+            for (int j = 0; j < ITEMS_PER_PRODUCER; j++) {
+                queue.push(j);
+            }
+            producers_finished++;
+        });
     }
     
-    // Pool should be empty
-    auto empty = pool.acquire();
-    ASSERT(!empty);
-    ASSERT_EQ(pool.used_count(), 10);
-    ASSERT_EQ(pool.free_count(), 0);
+    std::thread consumer([&]() {
+        while (consumed < TOTAL_ITEMS) {
+            auto val = queue.pop();
+            if (val.has_value()) {
+                consumed++;
+            }
+        }
+    });
     
-    // Release one
-    objects.pop_back();
-    ASSERT_EQ(pool.used_count(), 9);
-    ASSERT_EQ(pool.free_count(), 1);
+    for (auto& t : producers) t.join();
+    consumer.join();
     
-    // Acquire should work again
-    auto new_obj = pool.acquire();
-    ASSERT(new_obj);
-    
+    ASSERT_EQ(consumed, TOTAL_ITEMS);
     return true;
 }
 
-TEST_CASE(test_pool_auto_release) {
-    lockfree::ObjectPool<TestObject, 10> pool;
+TEST_CASE(test_mpmc_multi_producer_multi_consumer) {
+    lockfree::MPMCQueue<int> queue;
+    const int NUM_PRODUCERS = 4;
+    const int NUM_CONSUMERS = 4;
+    const int ITEMS_PER_PRODUCER = 5000;
+    const int TOTAL_ITEMS = NUM_PRODUCERS * ITEMS_PER_PRODUCER;
     
-    {
-        auto obj = pool.acquire();
-        ASSERT(obj);
-        ASSERT_EQ(pool.used_count(), 1);
-        // obj goes out of scope here
+    std::atomic<int> consumed{0};
+    std::atomic<int> producers_finished{0};
+    
+    // Producers
+    std::vector<std::thread> producers;
+    for (int i = 0; i < NUM_PRODUCERS; i++) {
+        producers.emplace_back([&]() {
+            for (int j = 0; j < ITEMS_PER_PRODUCER; j++) {
+                queue.push(j);
+            }
+            producers_finished++;
+        });
     }
     
-    ASSERT_EQ(pool.used_count(), 0);
-    ASSERT_EQ(pool.free_count(), 10);
+    // Consumers
+    std::vector<std::thread> consumers;
+    for (int i = 0; i < NUM_CONSUMERS; i++) {
+        consumers.emplace_back([&]() {
+            while (consumed < TOTAL_ITEMS) {
+                auto val = queue.pop();
+                if (val.has_value()) {
+                    consumed++;
+                }
+            }
+        });
+    }
     
+    for (auto& t : producers) t.join();
+    for (auto& t : consumers) t.join();
+    
+    ASSERT_EQ(consumed, TOTAL_ITEMS);
     return true;
 }
 
-TEST_CASE(test_pool_move_semantics) {
-    lockfree::ObjectPool<TestObject, 10> pool;
+TEST_CASE(test_mpmc_empty) {
+    lockfree::MPMCQueue<int> queue;
+    ASSERT(queue.empty());
     
-    auto obj1 = pool.acquire();
-    ASSERT(obj1);
-    ASSERT_EQ(pool.used_count(), 1);
+    queue.push(1);
+    ASSERT(!queue.empty());
     
-    auto obj2 = std::move(obj1);
-    ASSERT(!obj1);  // obj1 is now empty
-    ASSERT(obj2);   // obj2 has the object
-    ASSERT_EQ(pool.used_count(), 1);  // Still only 1 object in use
+    queue.pop();
+    ASSERT(queue.empty());
     
     return true;
 }

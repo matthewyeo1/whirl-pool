@@ -174,6 +174,11 @@ public:
 
             if (m_head.compare_exchange_weak(head, next,
                 std::memory_order_release, std::memory_order_relaxed)) {
+                #ifdef __linux__
+                // Verify next is still valid (debug only)
+                volatile char* test = reinterpret_cast<char*>(next);
+                asm volatile("" : : "r"(test) : "memory");  // Touch memory
+                #endif
                 T value = std::move(next->data);
                 retire_node(head);
                 cleanup();

@@ -1,14 +1,11 @@
-option(CI_BUILD "Building in CI environment" OFF)
-
-if(CI_BUILD)
-    target_compile_definitions(tests PRIVATE CI_BUILD)
-endif()
-
 cmake_minimum_required(VERSION 3.14)
 project(whirlpool VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# CI build option (default OFF)
+option(CI_BUILD "Building in CI environment" OFF)
 
 # Header-only library
 add_library(whirlpool INTERFACE)
@@ -17,6 +14,11 @@ target_include_directories(whirlpool INTERFACE include)
 # Single test executable
 add_executable(tests tests/test_main.cpp)
 target_link_libraries(tests whirlpool)
+
+# Pass CI_BUILD as a compiler definition
+if(CI_BUILD)
+    target_compile_definitions(tests PRIVATE CI_BUILD=1)
+endif()
 
 # Platform-specific compiler flags
 if(MSVC)

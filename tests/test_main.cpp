@@ -333,7 +333,7 @@ TEST_CASE(test_mpmc_multi_producer_single_consumer) {
 }
 
 // Due to the non-deterministic nature of MPMC queues, this test can be flaky in CI environments.
-#ifndef CI
+#ifndef CI_BUILD
 TEST_CASE(test_mpmc_multi_producer_multi_consumer) {
     lockfree::MPMCQueue<int> queue;
     const int NUM_PRODUCERS = 4;

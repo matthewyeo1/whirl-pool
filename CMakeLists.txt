@@ -1,3 +1,9 @@
+option(CI_BUILD "Building in CI environment" OFF)
+
+if(CI_BUILD)
+    target_compile_definitions(tests PRIVATE CI_BUILD)
+endif()
+
 cmake_minimum_required(VERSION 3.14)
 project(whirlpool VERSION 0.1.0 LANGUAGES CXX)
 

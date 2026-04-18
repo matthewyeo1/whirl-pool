@@ -333,14 +333,8 @@ TEST_CASE(test_mpmc_multi_producer_single_consumer) {
 }
 
 // Due to the non-deterministic nature of MPMC queues, this test can be flaky in CI environments.
-const char* ci = std::getenv("CI");
+#ifndef CI
 TEST_CASE(test_mpmc_multi_producer_multi_consumer) {
-    // Skip this test in CI environments
-    if (ci != nullptr && std::string(ci) == "true") {
-        std::cout << "  SKIPPED (flaky in CI)" << std::endl;
-        return true;
-    }
-
     lockfree::MPMCQueue<int> queue;
     const int NUM_PRODUCERS = 4;
     const int NUM_CONSUMERS = 4;
@@ -380,6 +374,7 @@ TEST_CASE(test_mpmc_multi_producer_multi_consumer) {
     ASSERT_EQ(consumed, TOTAL_ITEMS);
     return true;
 }
+#endif
 
 TEST_CASE(test_mpmc_empty) {
     lockfree::MPMCQueue<int> queue;

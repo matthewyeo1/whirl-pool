@@ -5,62 +5,8 @@
 #include <thread>
 #include <optional>
 #include <atomic>
-#include "lockfree/pool.hpp"
-#include "lockfree/mpmc_queue.hpp"
-
-// ============ SPSC QUEUE IMPLEMENTATION ============
-namespace lockfree {
-
-template<typename T, size_t Capacity>
-class SPSCQueue {
-    static_assert((Capacity & (Capacity - 1)) == 0, "Capacity must be power of 2");
-    
-public:
-    SPSCQueue() : m_head(0), m_tail(0) {}
-    
-    bool push(const T& value) {
-        size_t head = m_head.load(std::memory_order_relaxed);
-        size_t next_head = (head + 1) & (Capacity - 1);
-        
-        if (next_head == m_tail.load(std::memory_order_acquire)) {
-            return false;
-        }
-        
-        m_buffer[head] = value;
-        m_head.store(next_head, std::memory_order_release);
-        return true;
-    }
-    
-    std::optional<T> pop() {
-        size_t tail = m_tail.load(std::memory_order_relaxed);
-        
-        if (tail == m_head.load(std::memory_order_acquire)) {
-            return std::nullopt;
-        }
-        
-        T value = std::move(m_buffer[tail]);
-        m_tail.store((tail + 1) & (Capacity - 1), std::memory_order_release);
-        return value;
-    }
-    
-    bool empty() const {
-        return m_head.load(std::memory_order_acquire) == 
-               m_tail.load(std::memory_order_acquire);
-    }
-    
-    size_t size() const {
-        size_t head = m_head.load(std::memory_order_acquire);
-        size_t tail = m_tail.load(std::memory_order_acquire);
-        return (head - tail) & (Capacity - 1);
-    }
-    
-private:
-    alignas(lockfree::CACHE_LINE_SIZE) std::atomic<size_t> m_head;
-    alignas(lockfree::CACHE_LINE_SIZE) std::atomic<size_t> m_tail;
-    T m_buffer[Capacity];
-};
-
-}
+#include <cstring>
+#include "lockfree.h"
 
 // ============ TEST FRAMEWORK ============
 struct TestCase {
@@ -97,6 +43,30 @@ std::vector<TestCase>& get_tests() {
     if ((a) != (b)) { \
         std::cerr << "  FAIL: " << #a << " (" << a << ") != " << #b << " (" << b << ") line " << __LINE__ << std::endl; \
         return false; \
+    }
+
+// After each MPMC test, reset the hazard pointers
+#define MPMC_TEST_CASE(name) \
+    TEST_CASE(name) { \
+        bool result = false; \
+        { \
+            lockfree::MPMCQueue<int>::reset_for_testing(); \
+            result = name(); \
+        } \
+        lockfree::MPMCQueue<int>::reset_for_testing(); \
+        return result; \
+    }
+
+// After each stack test, reset the hazard pointers (test-only)
+#define STACK_TEST_CASE(name) \
+    TEST_CASE(name) { \
+        bool result = false; \
+        { \
+            lockfree::TStack<int>::reset_for_testing(); \
+            result = name(); \
+        } \
+        lockfree::TStack<int>::reset_for_testing(); \
+        return result; \
     }
 
 // ============ TESTS ============
@@ -253,6 +223,7 @@ TEST_CASE(test_spsc_threaded) {
 }
 
 TEST_CASE(test_mpmc_basic) {
+    lockfree::MPMCQueue<int>::reset_for_testing();
     lockfree::MPMCQueue<int> queue;
     
     queue.push(67);
@@ -267,12 +238,57 @@ TEST_CASE(test_mpmc_basic) {
     ASSERT_EQ(*val, 100);
     
     ASSERT(!queue.pop().has_value());
+    
     return true;
 }
 
-// Due to the non-deterministic nature of MPMC queues, this test can be flaky in CI environments.
-#ifndef CI_BUILD
+TEST_CASE(test_mpmc_multi_producer_multi_consumer) {
+    lockfree::MPMCQueue<int>::reset_for_testing();
+    lockfree::MPMCQueue<int> queue;
+    const int NUM_PRODUCERS = 4;
+    const int NUM_CONSUMERS = 4;
+    const int ITEMS_PER_PRODUCER = 5000;
+    const int TOTAL_ITEMS = NUM_PRODUCERS * ITEMS_PER_PRODUCER;
+    
+    std::atomic<int> consumed{0};
+    std::atomic<int> producers_finished{0};
+    
+    // Producers
+    std::vector<std::thread> producers;
+    for (int i = 0; i < NUM_PRODUCERS; i++) {
+        producers.emplace_back([&]() {
+            for (int j = 0; j < ITEMS_PER_PRODUCER; j++) {
+                queue.push(j);
+            }
+            producers_finished++;
+        });
+    }
+    
+    // Consumers
+    std::vector<std::thread> consumers;
+    for (int i = 0; i < NUM_CONSUMERS; i++) {
+        consumers.emplace_back([&]() {
+            while (consumed.load(std::memory_order_acquire) < TOTAL_ITEMS) {
+                auto val = queue.pop();
+                if (val.has_value()) {
+                    consumed.fetch_add(1, std::memory_order_relaxed);
+                } else if (producers_finished.load(std::memory_order_acquire) == NUM_PRODUCERS) {
+                    // No items and all producers done - check one more time
+                    if (consumed.load(std::memory_order_acquire) >= TOTAL_ITEMS) break;
+                }
+            }
+        });
+    }
+    
+    for (auto& t : producers) t.join();
+    for (auto& t : consumers) t.join();
+    
+    ASSERT_EQ(consumed.load(), TOTAL_ITEMS);
+    return true;
+}
+
 TEST_CASE(test_mpmc_single_producer_single_consumer) {
+    lockfree::MPMCQueue<int>::reset_for_testing();
     lockfree::MPMCQueue<int> queue;
     const int NUM_ITEMS = 50000;
     
@@ -300,12 +316,13 @@ TEST_CASE(test_mpmc_single_producer_single_consumer) {
 }
 
 TEST_CASE(test_mpmc_multi_producer_single_consumer) {
+    lockfree::MPMCQueue<int>::reset_for_testing();
     lockfree::MPMCQueue<int> queue;
     const int NUM_PRODUCERS = 4;
     const int ITEMS_PER_PRODUCER = 10000;
     const int TOTAL_ITEMS = NUM_PRODUCERS * ITEMS_PER_PRODUCER;
     std::atomic<int> consumed{0};
-    std::atomic<int> producers_finished{0};
+    std::atomic<bool> producers_done{false};  // ← Add this
     
     std::vector<std::thread> producers;
     for (int i = 0; i < NUM_PRODUCERS; i++) {
@@ -313,68 +330,36 @@ TEST_CASE(test_mpmc_multi_producer_single_consumer) {
             for (int j = 0; j < ITEMS_PER_PRODUCER; j++) {
                 queue.push(j);
             }
-            producers_finished++;
         });
     }
     
     std::thread consumer([&]() {
-        while (consumed < TOTAL_ITEMS) {
+        while (true) {
             auto val = queue.pop();
             if (val.has_value()) {
                 consumed++;
             }
+            
+            // Exit condition: all producers done AND consumed all items
+            if (producers_done.load() && consumed.load() >= TOTAL_ITEMS) {
+                break;
+            }
+            
+            // Small backoff to prevent CPU spinning when empty
+            if (!val.has_value()) {
+                std::this_thread::yield();
+            }
         }
-        return;
     });
     
     for (auto& t : producers) t.join();
+    producers_done = true;  // ← Signal consumers
+    
     consumer.join();
     
-    ASSERT_EQ(consumed, TOTAL_ITEMS);
+    ASSERT_EQ(consumed.load(), TOTAL_ITEMS);
     return true;
 }
-
-TEST_CASE(test_mpmc_multi_producer_multi_consumer) {
-    lockfree::MPMCQueue<int> queue;
-    const int NUM_PRODUCERS = 4;
-    const int NUM_CONSUMERS = 4;
-    const int ITEMS_PER_PRODUCER = 5000;
-    const int TOTAL_ITEMS = NUM_PRODUCERS * ITEMS_PER_PRODUCER;
-    
-    std::atomic<int> consumed{0};
-    std::atomic<int> producers_finished{0};
-    
-    // Producers
-    std::vector<std::thread> producers;
-    for (int i = 0; i < NUM_PRODUCERS; i++) {
-        producers.emplace_back([&]() {
-            for (int j = 0; j < ITEMS_PER_PRODUCER; j++) {
-                queue.push(j);
-            }
-            producers_finished++;
-        });
-    }
-    
-    // Consumers
-    std::vector<std::thread> consumers;
-    for (int i = 0; i < NUM_CONSUMERS; i++) {
-        consumers.emplace_back([&]() {
-            while (consumed < TOTAL_ITEMS) {
-                auto val = queue.pop();
-                if (val.has_value()) {
-                    consumed++;
-                }
-            }
-        });
-    }
-    
-    for (auto& t : producers) t.join();
-    for (auto& t : consumers) t.join();
-    
-    ASSERT_EQ(consumed, TOTAL_ITEMS);
-    return true;
-}
-#endif
 
 TEST_CASE(test_mpmc_empty) {
     lockfree::MPMCQueue<int> queue;
@@ -389,14 +374,158 @@ TEST_CASE(test_mpmc_empty) {
     return true;
 }
 
+TEST_CASE(test_stack_basic) {
+    // Reset hazard pointers for test isolation
+    lockfree::TStack<int>::reset_for_testing();
+    lockfree::TStack<int> stack;
+    
+    stack.push(42);
+    stack.push(100);
+    
+    auto val = stack.pop();
+    ASSERT(val.has_value());
+    ASSERT_EQ(*val, 100);  
+    
+    val = stack.pop();
+    ASSERT(val.has_value());
+    ASSERT_EQ(*val, 42);
+    
+    ASSERT(!stack.pop().has_value());
+    // Cleanup
+    lockfree::TStack<int>::reset_for_testing();
+    return true;
+}
+
+TEST_CASE(test_stack_single_producer_single_consumer) {
+    lockfree::TStack<int>::reset_for_testing();
+    lockfree::TStack<int> stack;
+    const int NUM_ITEMS = 50000;
+    
+    std::thread producer([&]() {
+        for (int i = 0; i < NUM_ITEMS; i++) {
+            stack.push(i);
+        }
+    });
+    
+    std::thread consumer([&]() {
+        int received = 0;
+        while (received < NUM_ITEMS) {
+            auto val = stack.pop();
+            if (val.has_value()) {
+                received++;
+            }
+        }
+        ASSERT_EQ(received, NUM_ITEMS);
+    });
+    
+    producer.join();
+    consumer.join();
+    lockfree::TStack<int>::reset_for_testing();
+    return true;
+}
+
+TEST_CASE(test_stack_multi_producer_multi_consumer) {
+    lockfree::TStack<int>::reset_for_testing();
+    lockfree::TStack<int> stack;
+    const int NUM_PRODUCERS = 4;
+    const int NUM_CONSUMERS = 4;
+    const int ITEMS_PER_PRODUCER = 5000;
+    const int TOTAL_ITEMS = NUM_PRODUCERS * ITEMS_PER_PRODUCER;
+    
+    std::atomic<int> produced{0};
+    std::atomic<int> consumed{0};
+    
+    std::vector<std::thread> producers;
+    for (int i = 0; i < NUM_PRODUCERS; i++) {
+        producers.emplace_back([&]() {
+            for (int j = 0; j < ITEMS_PER_PRODUCER; j++) {
+                stack.push(j);
+                produced++;
+            }
+        });
+    }
+    
+    std::vector<std::thread> consumers;
+    for (int i = 0; i < NUM_CONSUMERS; i++) {
+        consumers.emplace_back([&]() {
+            while (consumed < TOTAL_ITEMS) {
+                auto val = stack.pop();
+                if (val.has_value()) {
+                    consumed++;
+                } else {
+                    if (produced.load() < NUM_PRODUCERS) {
+                        std::this_thread::yield();
+                    }
+                }
+            }
+        });
+    }
+    
+    for (auto& t : producers) t.join();
+    for (auto& t : consumers) t.join();
+    ASSERT_EQ(consumed, TOTAL_ITEMS);
+    lockfree::TStack<int>::reset_for_testing();
+    return true;
+}
+
+TEST_CASE(test_stack_empty) {
+    lockfree::TStack<int>::reset_for_testing();
+    lockfree::TStack<int> stack;
+    ASSERT(stack.empty());
+    
+    stack.push(1);
+    ASSERT(!stack.empty());
+    
+    stack.pop();
+    ASSERT(stack.empty());
+    lockfree::TStack<int>::reset_for_testing();
+    return true;
+}
+
 // ============ MAIN ============
-int main() {
+int main(int argc, char** argv) {
+    std::string filter;
+    
+    // Parse command line arguments
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        
+        // Handle --gtest_filter=pattern
+        if (arg.find("--gtest_filter=") == 0) {
+            filter = arg.substr(15);  // Remove "--gtest_filter=" prefix
+        }
+        // Handle simple positional argument
+        else if (i == 1 && arg[0] != '-') {
+            filter = arg;
+        }
+    }
+    
     auto& tests = get_tests();
+    
+    // Build list of tests to run
+    std::vector<TestCase> to_run;
+    for (auto& test : tests) {
+        if (filter.empty()) {
+            to_run.push_back(test);
+        } else if (filter.back() == '*') {
+            // Wildcard match (e.g., "test_spsc_*")
+            std::string prefix = filter.substr(0, filter.length() - 1);
+            if (test.name.find(prefix) == 0) {
+                to_run.push_back(test);
+            }
+        } else if (test.name == filter) {
+            to_run.push_back(test);
+        }
+    }
+    
     std::cout << "=== whirl-pool Test Suite ===" << std::endl;
-    std::cout << "Running " << tests.size() << " tests..." << std::endl << std::endl;
+    if (!filter.empty()) {
+        std::cout << "Filter: " << filter << std::endl;
+    }
+    std::cout << "Running " << to_run.size() << " tests..." << std::endl << std::endl;
     
     int passed = 0;
-    for (auto& test : tests) {
+    for (auto& test : to_run) {
         std::cout << "TEST: " << test.name << "... ";
         if (test.func()) {
             std::cout << "PASSED" << std::endl;
@@ -406,6 +535,6 @@ int main() {
         }
     }
     
-    std::cout << std::endl << "Results: " << passed << "/" << tests.size() << " passed" << std::endl;
-    return passed == tests.size() ? 0 : 1;
+    std::cout << std::endl << "Results: " << passed << "/" << to_run.size() << " passed" << std::endl;
+    return passed == to_run.size() ? 0 : 1;
 }

@@ -5,6 +5,7 @@
 #include <thread>
 #include <optional>
 #include <atomic>
+#include <cstring>
 #include "lockfree.h"
 
 // ============ TEST FRAMEWORK ============
@@ -463,7 +464,39 @@ TEST_CASE(test_stack_empty) {
 }
 
 // ============ MAIN ============
-int main() {
+int main(int argc, char** argv) {
+
+    std::string filter;
+    
+    // Parse --gtest_filter argument
+    for (int i = 1; i < argc; i++) {
+        if (strncmp(argv[i], "--gtest_filter=", 15) == 0) {
+            filter = argv[i] + 15;
+            break;
+        }
+    }
+    
+    auto& tests = get_tests();
+    
+    // Filter tests if filter is specified
+    std::vector<TestCase> filtered_tests;
+    if (filter.empty()) {
+        filtered_tests = tests;
+    } else {
+        for (auto& test : tests) {
+            // Support wildcard * at the end (e.g., "test_spsc_*")
+            std::string pattern = filter;
+            if (pattern.back() == '*') {
+                pattern.pop_back();
+                if (test.name.find(pattern) == 0) {
+                    filtered_tests.push_back(test);
+                }
+            } else if (test.name == filter) {
+                filtered_tests.push_back(test);
+            }
+        }
+    }
+
     auto& tests = get_tests();
     std::cout << "=== whirl-pool Test Suite ===" << std::endl;
     std::cout << "Running " << tests.size() << " tests..." << std::endl << std::endl;

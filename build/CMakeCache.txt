@@ -23,6 +23,9 @@ BUILD_EXAMPLES:BOOL=OFF
 //No help, variable specified on the command line.
 BUILD_TESTS:UNINITIALIZED=ON
 
+//Building in CI environment
+CI_BUILD:BOOL=OFF
+
 //Path to a program.
 CMAKE_AR:FILEPATH=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.43.34808/bin/Hostx64/x64/lib.exe
 

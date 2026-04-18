@@ -465,43 +465,48 @@ TEST_CASE(test_stack_empty) {
 
 // ============ MAIN ============
 int main(int argc, char** argv) {
-
     std::string filter;
     
-    // Parse --gtest_filter argument
+    // Parse command line arguments
     for (int i = 1; i < argc; i++) {
-        if (strncmp(argv[i], "--gtest_filter=", 15) == 0) {
-            filter = argv[i] + 15;
-            break;
+        std::string arg = argv[i];
+        
+        // Handle --gtest_filter=pattern
+        if (arg.find("--gtest_filter=") == 0) {
+            filter = arg.substr(15);  // Remove "--gtest_filter=" prefix
+        }
+        // Handle simple positional argument
+        else if (i == 1 && arg[0] != '-') {
+            filter = arg;
         }
     }
     
     auto& tests = get_tests();
     
-    // Filter tests if filter is specified
-    std::vector<TestCase> filtered_tests;
-    if (filter.empty()) {
-        filtered_tests = tests;
-    } else {
-        for (auto& test : tests) {
-            // Support wildcard * at the end (e.g., "test_spsc_*")
-            std::string pattern = filter;
-            if (pattern.back() == '*') {
-                pattern.pop_back();
-                if (test.name.find(pattern) == 0) {
-                    filtered_tests.push_back(test);
-                }
-            } else if (test.name == filter) {
-                filtered_tests.push_back(test);
+    // Build list of tests to run
+    std::vector<TestCase> to_run;
+    for (auto& test : tests) {
+        if (filter.empty()) {
+            to_run.push_back(test);
+        } else if (filter.back() == '*') {
+            // Wildcard match (e.g., "test_spsc_*")
+            std::string prefix = filter.substr(0, filter.length() - 1);
+            if (test.name.find(prefix) == 0) {
+                to_run.push_back(test);
             }
+        } else if (test.name == filter) {
+            to_run.push_back(test);
         }
     }
     
     std::cout << "=== whirl-pool Test Suite ===" << std::endl;
-    std::cout << "Running " << tests.size() << " tests..." << std::endl << std::endl;
+    if (!filter.empty()) {
+        std::cout << "Filter: " << filter << std::endl;
+    }
+    std::cout << "Running " << to_run.size() << " tests..." << std::endl << std::endl;
     
     int passed = 0;
-    for (auto& test : tests) {
+    for (auto& test : to_run) {
         std::cout << "TEST: " << test.name << "... ";
         if (test.func()) {
             std::cout << "PASSED" << std::endl;
@@ -511,6 +516,6 @@ int main(int argc, char** argv) {
         }
     }
     
-    std::cout << std::endl << "Results: " << passed << "/" << tests.size() << " passed" << std::endl;
-    return passed == tests.size() ? 0 : 1;
+    std::cout << std::endl << "Results: " << passed << "/" << to_run.size() << " passed" << std::endl;
+    return passed == to_run.size() ? 0 : 1;
 }

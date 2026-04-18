@@ -193,6 +193,18 @@ public:
         Node* next = head->next.load(std::memory_order_acquire);
         return next == nullptr;
     }
+
+    // Reset all hazard pointer states
+    static void reset_for_testing() {
+        // Clear all slots
+        for (auto& hp : h_ptrs) {
+            hp.owner.store(std::thread::id(), std::memory_order_release);
+            hp.pointer.store(nullptr, std::memory_order_release);
+        }
+        
+        // Note: retired_nodes and local_hp are thread_local
+        // They will be cleaned up when each thread exits naturally
+    }
 };
 
 template<typename T>

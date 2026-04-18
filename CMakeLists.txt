@@ -11,17 +11,28 @@ target_include_directories(whirlpool INTERFACE include)
 # Single test executable
 add_executable(tests tests/test_main.cpp)
 target_link_libraries(tests whirlpool)
-target_compile_options(tests PRIVATE /O2 /W3)
+
+# Platform-specific compiler flags
+if(MSVC)
+    target_compile_options(tests PRIVATE /O2 /W3)
+else()
+    target_compile_options(tests PRIVATE -O2 -Wall -Wextra)
+endif()
 
 enable_testing()
 add_test(NAME whirlpool_tests COMMAND tests)
 
-# Run benchmarks
-option(BUILD_BENCHMARKS "Build benchmarks" ON)
+# Benchmarks (optional, off by default for CI)
+option(BUILD_BENCHMARKS "Build benchmarks" OFF)
 
 if(BUILD_BENCHMARKS)
     find_package(benchmark REQUIRED)
     add_executable(bench_pool benchmarks/bench_pool.cpp)
     target_link_libraries(bench_pool whirlpool benchmark::benchmark)
-    target_compile_options(bench_pool PRIVATE /O2)
+    
+    if(MSVC)
+        target_compile_options(bench_pool PRIVATE /O2)
+    else()
+        target_compile_options(bench_pool PRIVATE -O2)
+    endif()
 endif()

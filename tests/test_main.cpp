@@ -242,6 +242,7 @@ TEST_CASE(test_spsc_threaded) {
                 received++;
             }
         }
+        return;
     });
     
     producer.join();
@@ -321,6 +322,7 @@ TEST_CASE(test_mpmc_multi_producer_single_consumer) {
                 consumed++;
             }
         }
+        return;
     });
     
     for (auto& t : producers) t.join();

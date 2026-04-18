@@ -15,3 +15,13 @@ target_compile_options(tests PRIVATE /O2 /W3)
 
 enable_testing()
 add_test(NAME whirlpool_tests COMMAND tests)
+
+# Run benchmarks
+option(BUILD_BENCHMARKS "Build benchmarks" ON)
+
+if(BUILD_BENCHMARKS)
+    find_package(benchmark REQUIRED)
+    add_executable(bench_pool benchmarks/bench_pool.cpp)
+    target_link_libraries(bench_pool whirlpool benchmark::benchmark)
+    target_compile_options(bench_pool PRIVATE /O2)
+endif()

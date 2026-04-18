@@ -17,6 +17,15 @@ A header-only library for high-performance, low-latency systems. Built for learn
 
 - CMake 3.14+
 - C++17 Compiler (MSVC/GCC/Clang)
+- Google Benchmark via `vcpkg`:
+
+```
+git clone https://github.com/microsoft/vcpkg.git
+cd vcpkg
+.\bootstrap-vcpkg.bat
+.\vcpkg install benchmark:x64-windows
+.\vcpkg integrate install
+```
 
 ### Windows (Powershell)
 
@@ -34,6 +43,14 @@ cd build
 cmake .. -DBUILD_TESTS=ON
 make
 ./tests
+```
+
+## Run Benchmarks
+```
+cd build
+cmake .. -DBUILD_BENCHMARKS=ON -DCMAKE_TOOLCHAIN_FILE=C:/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake
+cmake --build . --config Release
+.\Release\bench_pool.exe
 ```
 
 ## License

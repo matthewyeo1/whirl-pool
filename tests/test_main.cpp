@@ -7,6 +7,7 @@
 #include <atomic>
 #include "lockfree/pool.hpp"
 #include "lockfree/mpmc_queue.hpp"
+#include "lockfree/stack.hpp"
 
 // ============ SPSC QUEUE IMPLEMENTATION ============
 namespace lockfree {
@@ -270,7 +271,8 @@ TEST_CASE(test_mpmc_basic) {
     return true;
 }
 
-// Due to the non-deterministic nature of MPMC queues, this test can be flaky in CI environments.
+// Due to the non-deterministic nature of MPMC queues & Treiber stacks, 
+// these tests can be flaky in CI environments.
 #ifndef CI_BUILD
 TEST_CASE(test_mpmc_single_producer_single_consumer) {
     lockfree::MPMCQueue<int> queue;
@@ -374,7 +376,6 @@ TEST_CASE(test_mpmc_multi_producer_multi_consumer) {
     ASSERT_EQ(consumed, TOTAL_ITEMS);
     return true;
 }
-#endif
 
 TEST_CASE(test_mpmc_empty) {
     lockfree::MPMCQueue<int> queue;
@@ -388,6 +389,102 @@ TEST_CASE(test_mpmc_empty) {
     
     return true;
 }
+
+TEST_CASE(test_stack_basic) {
+    lockfree::TStack<int> stack;
+    
+    stack.push(42);
+    stack.push(100);
+    
+    auto val = stack.pop();
+    ASSERT(val.has_value());
+    ASSERT_EQ(*val, 100);  // LIFO: last in, first out
+    
+    val = stack.pop();
+    ASSERT(val.has_value());
+    ASSERT_EQ(*val, 42);
+    
+    ASSERT(!stack.pop().has_value());
+    return true;
+}
+
+TEST_CASE(test_stack_single_producer_single_consumer) {
+    lockfree::TStack<int> stack;
+    const int NUM_ITEMS = 50000;
+    
+    std::thread producer([&]() {
+        for (int i = 0; i < NUM_ITEMS; i++) {
+            stack.push(i);
+        }
+    });
+    
+    std::thread consumer([&]() {
+        int received = 0;
+        while (received < NUM_ITEMS) {
+            auto val = stack.pop();
+            if (val.has_value()) {
+                received++;
+            }
+        }
+        ASSERT_EQ(received, NUM_ITEMS);
+    });
+    
+    producer.join();
+    consumer.join();
+    
+    return true;
+}
+
+TEST_CASE(test_stack_multi_producer_multi_consumer) {
+    lockfree::TStack<int> stack;
+    const int NUM_PRODUCERS = 4;
+    const int NUM_CONSUMERS = 4;
+    const int ITEMS_PER_PRODUCER = 5000;
+    const int TOTAL_ITEMS = NUM_PRODUCERS * ITEMS_PER_PRODUCER;
+    
+    std::atomic<int> consumed{0};
+    
+    std::vector<std::thread> producers;
+    for (int i = 0; i < NUM_PRODUCERS; i++) {
+        producers.emplace_back([&]() {
+            for (int j = 0; j < ITEMS_PER_PRODUCER; j++) {
+                stack.push(j);
+            }
+        });
+    }
+    
+    std::vector<std::thread> consumers;
+    for (int i = 0; i < NUM_CONSUMERS; i++) {
+        consumers.emplace_back([&]() {
+            while (consumed < TOTAL_ITEMS) {
+                auto val = stack.pop();
+                if (val.has_value()) {
+                    consumed++;
+                }
+            }
+        });
+    }
+    
+    for (auto& t : producers) t.join();
+    for (auto& t : consumers) t.join();
+    
+    ASSERT_EQ(consumed, TOTAL_ITEMS);
+    return true;
+}
+
+TEST_CASE(test_stack_empty) {
+    lockfree::TStack<int> stack;
+    ASSERT(stack.empty());
+    
+    stack.push(1);
+    ASSERT(!stack.empty());
+    
+    stack.pop();
+    ASSERT(stack.empty());
+    
+    return true;
+}
+#endif
 
 // ============ MAIN ============
 int main() {

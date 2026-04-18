@@ -233,6 +233,21 @@ public:
         }
         return count;
     }
+
+    // Reset all hazard pointer states (for testing)
+    static void reset_for_testing() {
+        for (auto& hp : h_ptrs) {
+            hp.owner.store(std::thread::id(), std::memory_order_release);
+            hp.pointer.store(nullptr, std::memory_order_release);
+        }
+
+        // Clear thread-local retired nodes for this thread
+        for (Node* n : retired_nodes) delete n;
+        retired_nodes.clear();
+
+        // Clear cached local hazard pointer for this thread
+        local_hp = nullptr;
+    }
 };
 
 template<typename T>

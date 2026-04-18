@@ -1,26 +1,40 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
 
 jobs:
-  windows:
-    runs-on: windows-latest
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        
+    runs-on: ${{ matrix.os }}
+    
     steps:
     - uses: actions/checkout@v4
-    - name: Configure
-      run: cmake -B build -DBUILD_TESTS=ON
-    - name: Build
-      run: cmake --build build --config Release
-    - name: Test
-      run: ./build/Release/tests.exe
-
-  linux:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: Configure
-      run: cmake -B build -DBUILD_TESTS=ON
-    - name: Build
-      run: cmake --build build --config Release
-    - name: Test
+    
+    - name: Configure (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        rm -rf build  # Clean old cache
+        cmake -B build -DBUILD_TESTS=ON
+        cmake --build build --config Release
+    
+    - name: Test (Linux)
+      if: runner.os == 'Linux'
       run: ./build/tests
+    
+    - name: Configure (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
+        cmake -B build -DBUILD_TESTS=ON
+        cmake --build build --config Release
+    
+    - name: Test (Windows)
+      if: runner.os == 'Windows'
+      run: ./build/Release/tests.exe

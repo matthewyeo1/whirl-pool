@@ -496,8 +496,7 @@ int main(int argc, char** argv) {
             }
         }
     }
-
-    auto& tests = get_tests();
+    
     std::cout << "=== whirl-pool Test Suite ===" << std::endl;
     std::cout << "Running " << tests.size() << " tests..." << std::endl << std::endl;
     

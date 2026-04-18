@@ -7,34 +7,35 @@ on:
     branches: [ main, master ]
 
 jobs:
-  test:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        
-    runs-on: ${{ matrix.os }}
-    
+  test-linux:
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
     
-    - name: Configure (Linux)
-      if: runner.os == 'Linux'
+    - name: Install Google Benchmark
       run: |
-        rm -rf build  # Clean old cache
-        cmake -B build -DBUILD_TESTS=ON
-        cmake --build build --config Release
+        sudo apt-get update
+        sudo apt-get install -y libbenchmark-dev
     
-    - name: Test (Linux)
-      if: runner.os == 'Linux'
-      run: ./build/tests
+    - name: Configure
+      run: cmake -B build_ci -DBUILD_TESTS=ON -DBUILD_BENCHMARKS=OFF
     
-    - name: Configure (Windows)
-      if: runner.os == 'Windows'
-      run: |
-        Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
-        cmake -B build -DBUILD_TESTS=ON
-        cmake --build build --config Release
+    - name: Build
+      run: cmake --build build_ci --config Release
     
-    - name: Test (Windows)
-      if: runner.os == 'Windows'
-      run: ./build/Release/tests.exe
+    - name: Test
+      run: ./build_ci/tests
+
+  test-windows:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Configure
+      run: cmake -B build_ci -DBUILD_TESTS=ON -DBUILD_BENCHMARKS=OFF
+    
+    - name: Build
+      run: cmake --build build_ci --config Release
+    
+    - name: Test
+      run: ./build_ci/Release/tests.exe

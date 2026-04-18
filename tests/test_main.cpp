@@ -212,6 +212,51 @@ TEST_CASE(test_mpmc_basic) {
     ASSERT_EQ(*val, 100);
     
     ASSERT(!queue.pop().has_value());
+    
+    return true;
+}
+
+TEST_CASE(test_mpmc_multi_producer_multi_consumer) {
+    lockfree::MPMCQueue<int> queue;
+    const int NUM_PRODUCERS = 4;
+    const int NUM_CONSUMERS = 4;
+    const int ITEMS_PER_PRODUCER = 5000;
+    const int TOTAL_ITEMS = NUM_PRODUCERS * ITEMS_PER_PRODUCER;
+    
+    std::atomic<int> consumed{0};
+    std::atomic<int> producers_finished{0};
+    
+    // Producers
+    std::vector<std::thread> producers;
+    for (int i = 0; i < NUM_PRODUCERS; i++) {
+        producers.emplace_back([&]() {
+            for (int j = 0; j < ITEMS_PER_PRODUCER; j++) {
+                queue.push(j);
+            }
+            producers_finished++;
+        });
+    }
+    
+    // Consumers
+    std::vector<std::thread> consumers;
+    for (int i = 0; i < NUM_CONSUMERS; i++) {
+        consumers.emplace_back([&]() {
+            while (consumed.load(std::memory_order_acquire) < TOTAL_ITEMS) {
+                auto val = queue.pop();
+                if (val.has_value()) {
+                    consumed.fetch_add(1, std::memory_order_relaxed);
+                } else if (producers_finished.load(std::memory_order_acquire) == NUM_PRODUCERS) {
+                    // No items and all producers done - check one more time
+                    if (consumed.load(std::memory_order_acquire) >= TOTAL_ITEMS) break;
+                }
+            }
+        });
+    }
+    
+    for (auto& t : producers) t.join();
+    for (auto& t : consumers) t.join();
+    
+    ASSERT_EQ(consumed.load(), TOTAL_ITEMS);
     return true;
 }
 
@@ -284,47 +329,6 @@ TEST_CASE(test_mpmc_multi_producer_single_consumer) {
     consumer.join();
     
     ASSERT_EQ(consumed.load(), TOTAL_ITEMS);
-    return true;
-}
-
-TEST_CASE(test_mpmc_multi_producer_multi_consumer) {
-    lockfree::MPMCQueue<int> queue;
-    const int NUM_PRODUCERS = 4;
-    const int NUM_CONSUMERS = 4;
-    const int ITEMS_PER_PRODUCER = 5000;
-    const int TOTAL_ITEMS = NUM_PRODUCERS * ITEMS_PER_PRODUCER;
-    
-    std::atomic<int> consumed{0};
-    std::atomic<int> producers_finished{0};
-    
-    // Producers
-    std::vector<std::thread> producers;
-    for (int i = 0; i < NUM_PRODUCERS; i++) {
-        producers.emplace_back([&]() {
-            for (int j = 0; j < ITEMS_PER_PRODUCER; j++) {
-                queue.push(j);
-            }
-            producers_finished++;
-        });
-    }
-    
-    // Consumers
-    std::vector<std::thread> consumers;
-    for (int i = 0; i < NUM_CONSUMERS; i++) {
-        consumers.emplace_back([&]() {
-            while (consumed < TOTAL_ITEMS) {
-                auto val = queue.pop();
-                if (val.has_value()) {
-                    consumed++;
-                }
-            }
-        });
-    }
-    
-    for (auto& t : producers) t.join();
-    for (auto& t : consumers) t.join();
-    
-    ASSERT_EQ(consumed, TOTAL_ITEMS);
     return true;
 }
 

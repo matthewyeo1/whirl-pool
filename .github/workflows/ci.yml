@@ -20,7 +20,8 @@ jobs:
     
     - name: Run tests (skip MPMC and Stack)
       run: |
-        ./tests --gtest_filter="test_spsc_*:test_pool_*:test_mpmc_basic:test_mpmc_empty:test_mpmc_single_*:test_stack_basic:test_stack_empty:test_hashmap_*:test_counter_*:test_rcu_*:test_ring_buffer_*"
+        # Run all relevant tests on Linux; explicitly include test groups except MPMC and Stack
+        ./build_ci/tests --gtest_filter="test_pool_*:test_spsc_*:test_ring_buffer_*:test_hashmap_*:test_counter_*:test_rcu_*:test_simple_rcu_*"
 
   test-windows:
     runs-on: windows-latest

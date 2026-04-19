@@ -14,11 +14,6 @@ namespace lockfree {
  * 
  * Multi-producer multi-consumer lock-free stack using CAS.
  * 
- * Usage:
- *   TreiberStack<int> stack;
- *   stack.push(42);
- *   auto value = stack.pop();  // std::optional<int>
- * 
  * Reference: Treiber, 1986
  */
 template<typename T>

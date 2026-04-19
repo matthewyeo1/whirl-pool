@@ -5,3 +5,4 @@
 #include "lockfree/pool.hpp"
 #include "lockfree/mpmc_queue.hpp"
 #include "lockfree/stack.hpp"
+#include "lockfree/ringbuffer.hpp"

@@ -14,11 +14,6 @@ namespace lockfree {
  * 
  * Multi-Producer Multi-Consumer queue using atomic compare-and-swap.
  * 
- * Usage:
- *   MPMCQueue<int> queue;
- *   queue.push(42);
- *   auto value = queue.pop();  // std::optional<int>
- * 
  * Reference: Michael & Scott, PODC 1996
  */
 template<typename T>

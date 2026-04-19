@@ -12,11 +12,7 @@ namespace lockfree {
  * Design: Circular ring buffer with atomic head/tail
  * Wait-free for both push and pop (no retry loops)
  * 
- * Usage:
- *   SPSCQueue<int, 1024> queue;
- *   queue.push(42);
- *   auto val = queue.pop();
- */
+*/
 template<typename T, size_t Capacity>
 class SPSCQueue {
     static_assert((Capacity & (Capacity - 1)) == 0, "Capacity must be power of 2");

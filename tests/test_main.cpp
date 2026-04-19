@@ -222,6 +222,7 @@ TEST_CASE(test_spsc_threaded) {
     return true;
 }
 
+
 TEST_CASE(test_mpmc_basic) {
     lockfree::MPMCQueue<int>::reset_for_testing();
     lockfree::MPMCQueue<int> queue;
@@ -481,6 +482,108 @@ TEST_CASE(test_stack_empty) {
     lockfree::TStack<int>::reset_for_testing();
     return true;
 }
+
+TEST_CASE(test_ring_buffer_basic) {
+    lockfree::RingBuffer<int, 8> buffer;
+    
+    ASSERT(buffer.empty());
+    ASSERT(!buffer.full());
+    
+    ASSERT(buffer.push(42));
+    ASSERT(!buffer.empty());
+    ASSERT_EQ(buffer.size(), 1);
+    
+    auto val = buffer.pop();
+    ASSERT(val.has_value());
+    ASSERT_EQ(*val, 42);
+    ASSERT(buffer.empty());
+    
+    return true;
+}
+
+TEST_CASE(test_ring_buffer_full) {
+    lockfree::RingBuffer<int, 4> buffer;
+    
+    // Fill the buffer
+    for (int i = 0; i < 4; i++) {
+        ASSERT(buffer.push(i));
+    }
+    
+    ASSERT(buffer.full());
+    ASSERT(!buffer.push(999));  // Should fail
+    
+    // Empty it
+    for (int i = 0; i < 4; i++) {
+        auto val = buffer.pop();
+        ASSERT(val.has_value());
+        ASSERT_EQ(*val, i);
+    }
+    
+    ASSERT(buffer.empty());
+    
+    return true;
+}
+
+TEST_CASE(test_ring_buffer_multi_producer_multi_consumer) {
+    lockfree::RingBuffer<int, 65536> buffer;
+    const int NUM_PRODUCERS = 4;
+    const int NUM_CONSUMERS = 4;
+    const int ITEMS_PER_PRODUCER = 10000;
+    const int TOTAL_ITEMS = NUM_PRODUCERS * ITEMS_PER_PRODUCER;
+    
+    std::atomic<int> produced{0};
+    std::atomic<int> consumed{0};
+    
+    std::vector<std::thread> producers;
+    for (int i = 0; i < NUM_PRODUCERS; i++) {
+        producers.emplace_back([&]() {
+            for (int j = 0; j < ITEMS_PER_PRODUCER; j++) {
+                while (!buffer.push(j)) {
+                    std::this_thread::yield();
+                }
+                produced++;
+            }
+        });
+    }
+    
+    std::vector<std::thread> consumers;
+    for (int i = 0; i < NUM_CONSUMERS; i++) {
+        consumers.emplace_back([&]() {
+            while (consumed < TOTAL_ITEMS) {
+                auto val = buffer.pop();
+                if (val.has_value()) {
+                    consumed++;
+                }
+            }
+        });
+    }
+    
+    for (auto& t : producers) t.join();
+    for (auto& t : consumers) t.join();
+    
+    ASSERT_EQ(consumed, TOTAL_ITEMS);
+    return true;
+}
+
+TEST_CASE(test_ring_buffer_wraparound) {
+    lockfree::RingBuffer<int, 4> buffer;
+    
+    // Fill and empty multiple times to test wraparound
+    for (int round = 0; round < 10; round++) {
+        for (int i = 0; i < 4; i++) {
+            ASSERT(buffer.push(i));
+        }
+        for (int i = 0; i < 4; i++) {
+            auto val = buffer.pop();
+            ASSERT(val.has_value());
+            ASSERT_EQ(*val, i);
+        }
+    }
+    
+    return true;
+}
+
+// (removed smoke test)
 
 // ============ MAIN ============
 int main(int argc, char** argv) {

@@ -21,7 +21,7 @@ jobs:
     - name: Run SPSC tests
       run: |
         ./build_ci/tests --gtest_filter="test_spsc_*"
-    
+
     - name: Run Pool tests
       run: |
         ./build_ci/tests --gtest_filter="test_pool_*"

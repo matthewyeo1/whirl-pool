@@ -16,11 +16,6 @@ class PooledPtr;
  * 
  * Pre-allocates N objects and provides lock-free acquire/release
  * 
- * Usage:
- *   ObjectPool<MyClass, 10000> pool;
- *   auto obj = pool.acquire();
- *   obj->doSomething();
- * 
  * obj auto-returns to pool on destruction
  */
 template<typename T, size_t Capacity = 65536>

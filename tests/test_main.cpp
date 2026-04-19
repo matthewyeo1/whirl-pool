@@ -51,30 +51,6 @@ std::vector<TestCase>& get_tests() {
         return false; \
     }
 
-// After each MPMC test, reset the hazard pointers
-#define MPMC_TEST_CASE(name) \
-    TEST_CASE(name) { \
-        bool result = false; \
-        { \
-            lockfree::MPMCQueue<int>::reset_for_testing(); \
-            result = name(); \
-        } \
-        lockfree::MPMCQueue<int>::reset_for_testing(); \
-        return result; \
-    }
-
-// After each stack test, reset the hazard pointers (test-only)
-#define STACK_TEST_CASE(name) \
-    TEST_CASE(name) { \
-        bool result = false; \
-        { \
-            lockfree::TStack<int>::reset_for_testing(); \
-            result = name(); \
-        } \
-        lockfree::TStack<int>::reset_for_testing(); \
-        return result; \
-    }
-
 // ============ TESTS ============
 TEST_CASE(test_pool_basic) {
     lockfree::ObjectPool<TestObject, 100> pool;
@@ -227,9 +203,7 @@ TEST_CASE(test_spsc_threaded) {
     return true;
 }
 
-
 TEST_CASE(test_mpmc_basic) {
-    lockfree::MPMCQueue<int>::reset_for_testing();
     lockfree::MPMCQueue<int> queue;
     
     queue.push(67);
@@ -249,7 +223,6 @@ TEST_CASE(test_mpmc_basic) {
 }
 
 TEST_CASE(test_mpmc_multi_producer_multi_consumer) {
-    lockfree::MPMCQueue<int>::reset_for_testing();
     lockfree::MPMCQueue<int> queue;
     const int NUM_PRODUCERS = 4;
     const int NUM_CONSUMERS = 4;
@@ -294,7 +267,6 @@ TEST_CASE(test_mpmc_multi_producer_multi_consumer) {
 }
 
 TEST_CASE(test_mpmc_single_producer_single_consumer) {
-    lockfree::MPMCQueue<int>::reset_for_testing();
     lockfree::MPMCQueue<int> queue;
     const int NUM_ITEMS = 50000;
     
@@ -322,7 +294,6 @@ TEST_CASE(test_mpmc_single_producer_single_consumer) {
 }
 
 TEST_CASE(test_mpmc_multi_producer_single_consumer) {
-    lockfree::MPMCQueue<int>::reset_for_testing();
     lockfree::MPMCQueue<int> queue;
     const int NUM_PRODUCERS = 4;
     const int ITEMS_PER_PRODUCER = 10000;
@@ -381,8 +352,6 @@ TEST_CASE(test_mpmc_empty) {
 }
 
 TEST_CASE(test_stack_basic) {
-    // Reset hazard pointers for test isolation
-    lockfree::TStack<int>::reset_for_testing();
     lockfree::TStack<int> stack;
     
     stack.push(42);
@@ -397,13 +366,10 @@ TEST_CASE(test_stack_basic) {
     ASSERT_EQ(*val, 42);
     
     ASSERT(!stack.pop().has_value());
-    // Cleanup
-    lockfree::TStack<int>::reset_for_testing();
     return true;
 }
 
 TEST_CASE(test_stack_single_producer_single_consumer) {
-    lockfree::TStack<int>::reset_for_testing();
     lockfree::TStack<int> stack;
     const int NUM_ITEMS = 50000;
     
@@ -426,12 +392,10 @@ TEST_CASE(test_stack_single_producer_single_consumer) {
     
     producer.join();
     consumer.join();
-    lockfree::TStack<int>::reset_for_testing();
     return true;
 }
 
 TEST_CASE(test_stack_multi_producer_multi_consumer) {
-    lockfree::TStack<int>::reset_for_testing();
     lockfree::TStack<int> stack;
     const int NUM_PRODUCERS = 4;
     const int NUM_CONSUMERS = 4;
@@ -470,12 +434,10 @@ TEST_CASE(test_stack_multi_producer_multi_consumer) {
     for (auto& t : producers) t.join();
     for (auto& t : consumers) t.join();
     ASSERT_EQ(consumed, TOTAL_ITEMS);
-    lockfree::TStack<int>::reset_for_testing();
     return true;
 }
 
 TEST_CASE(test_stack_empty) {
-    lockfree::TStack<int>::reset_for_testing();
     lockfree::TStack<int> stack;
     ASSERT(stack.empty());
     
@@ -484,7 +446,6 @@ TEST_CASE(test_stack_empty) {
     
     stack.pop();
     ASSERT(stack.empty());
-    lockfree::TStack<int>::reset_for_testing();
     return true;
 }
 

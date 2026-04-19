@@ -2,6 +2,7 @@
 #include <atomic>
 #include <optional>
 #include <memory>
+#include <array>
 #include <vector>
 #include <thread>
 #include <stdexcept>
@@ -32,6 +33,18 @@ private:
         std::atomic<Node*> pointer;
         HazardPointer() : owner(std::thread::id()), pointer(nullptr) {}
     };
+    
+    struct ThreadHPGuard {
+        ~ThreadHPGuard() {
+            if (local_hp) {
+                local_hp->pointer.store(nullptr, std::memory_order_release);
+                local_hp->owner.store(std::thread::id(), std::memory_order_release);
+                local_hp = nullptr;
+            }
+            retired_nodes.clear();
+        }
+    };
+    static thread_local ThreadHPGuard hp_guard;
 
     static constexpr int MAX_HAZARD_POINTERS = 256;
     static std::array<HazardPointer, MAX_HAZARD_POINTERS> h_ptrs;
@@ -42,6 +55,7 @@ private:
     alignas(CACHE_LINE_SIZE) std::atomic<Node*> m_tail;
 
     static HazardPointer* get_hazard_pointer() {
+        (void)hp_guard;
         if (local_hp) return local_hp;
         auto id = std::this_thread::get_id();
         for (auto& hp : h_ptrs) {
@@ -188,18 +202,6 @@ public:
         Node* next = head->next.load(std::memory_order_acquire);
         return next == nullptr;
     }
-
-    // Reset all hazard pointer states
-    static void reset_for_testing() {
-        // Clear all slots
-        for (auto& hp : h_ptrs) {
-            hp.owner.store(std::thread::id(), std::memory_order_release);
-            hp.pointer.store(nullptr, std::memory_order_release);
-        }
-        
-        // Note: retired_nodes and local_hp are thread_local
-        // They will be cleaned up when each thread exits naturally
-    }
 };
 
 template<typename T>
@@ -211,4 +213,7 @@ thread_local std::vector<typename MPMCQueue<T>::Node*> MPMCQueue<T>::retired_nod
 
 template<typename T>
 thread_local typename MPMCQueue<T>::HazardPointer* MPMCQueue<T>::local_hp = nullptr;
+
+template<typename T>
+thread_local typename MPMCQueue<T>::ThreadHPGuard MPMCQueue<T>::hp_guard;
 } 

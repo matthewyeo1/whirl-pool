@@ -6,3 +6,4 @@
 #include "lockfree/mpmc_queue.hpp"
 #include "lockfree/stack.hpp"
 #include "lockfree/ringbuffer.hpp"
+#include "lockfree/hashmap.hpp"

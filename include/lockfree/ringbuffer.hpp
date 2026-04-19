@@ -47,7 +47,7 @@ public:
     RingBuffer() {
         // Allocate slots on the heap to avoid large stack usage
         m_slots = std::make_unique<Slot[]>(Capacity);
-        // Initialize sequence numbers: 0..Capacity-1
+        
         for (size_t i = 0; i < Capacity; i++) {
             m_slots[i].sequence.store(i, std::memory_order_relaxed);
         }

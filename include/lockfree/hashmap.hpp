@@ -20,45 +20,39 @@ class HashMap {
     
 public:
     HashMap() : m_size(0) {
-        // Allocate storage on the heap to avoid large stack/ABI objects
-        m_occupied = std::make_unique<std::atomic<bool>[]>(Capacity);
-        m_keys = std::make_unique<Key[]>(Capacity);
-        m_values = std::make_unique<std::atomic<Value>[]>(Capacity);
-
-        // Initialize all entries as empty
+        // Initialize all slots as empty
         for (size_t i = 0; i < Capacity; i++) {
             m_occupied[i].store(false, std::memory_order_relaxed);
         }
     }
     
-    // Insert KV pair
+    // Disable copy
+    HashMap(const HashMap&) = delete;
+    HashMap& operator=(const HashMap&) = delete;
+    
     bool insert(const Key& key, const Value& value) {
         size_t idx = hash(key);
         size_t start = idx;
         
         while (true) {
-            bool occupied = m_occupied[idx].load(std::memory_order_acquire);
+            bool expected = false;
             
-            if (!occupied) {
-                // Try to claim this slot
-                bool expected = false;
-                if (m_occupied[idx].compare_exchange_weak(expected, true,
-                    std::memory_order_release, std::memory_order_relaxed)) {
-                    m_keys[idx] = key;
-                    m_values[idx].store(value, std::memory_order_release);
-                    m_size.fetch_add(1, std::memory_order_relaxed);
-                    return true;
-                }
-            }
-            else {
-                // Slot occupied, check if key matches
-                Key current_key = m_keys[idx];
-                if (current_key == key) {
-                    m_values[idx].store(value, std::memory_order_release);
-                    return true;
-                }
+            // Try to claim this slot if empty
+            if (m_occupied[idx].compare_exchange_weak(expected, true,
+                std::memory_order_acquire, std::memory_order_relaxed)) {
+                m_keys[idx] = key;
+                m_values[idx].store(value, std::memory_order_release);
+                m_size.fetch_add(1, std::memory_order_relaxed);
+                return true;
             }
             
+            // Slot already occupied, check if it's our key
+            if (m_keys[idx] == key) {
+                m_values[idx].store(value, std::memory_order_release);
+                return true;
+            }
+            
+            // Move to next slot
             idx = (idx + 1) & (Capacity - 1);
             if (idx == start) {
                 return false;  // Table full
@@ -66,15 +60,12 @@ public:
         }
     }
     
-    // Retrieve KV pair if inside hashmap
     std::optional<Value> find(const Key& key) const {
         size_t idx = hash(key);
         size_t start = idx;
         
         while (true) {
-            bool occupied = m_occupied[idx].load(std::memory_order_acquire);
-            
-            if (!occupied) {
+            if (!m_occupied[idx].load(std::memory_order_acquire)) {
                 return std::nullopt;
             }
             
@@ -89,15 +80,12 @@ public:
         }
     }
     
-    // Remove KV pair
     bool erase(const Key& key) {
         size_t idx = hash(key);
         size_t start = idx;
         
         while (true) {
-            bool occupied = m_occupied[idx].load(std::memory_order_acquire);
-            
-            if (!occupied) {
+            if (!m_occupied[idx].load(std::memory_order_acquire)) {
                 return false;
             }
             
@@ -131,18 +119,14 @@ public:
     }
     
 private:
-    static constexpr Key EMPTY_KEY = Key(-1);
-    static constexpr Key TOMBSTONE_KEY = Key(-2);
-    
     size_t hash(const Key& key) const {
         return std::hash<Key>{}(key) & (Capacity - 1);
     }
     
-    // Heap-allocated arrays to avoid huge stack objects
-    std::unique_ptr<std::atomic<bool>[]> m_occupied;
-    std::unique_ptr<Key[]> m_keys;
-    std::unique_ptr<std::atomic<Value>[]> m_values;
-    std::atomic<size_t> m_size{0};
+    alignas(CACHE_LINE_SIZE) std::atomic<bool> m_occupied[Capacity];
+    Key m_keys[Capacity];
+    alignas(CACHE_LINE_SIZE) std::atomic<Value> m_values[Capacity];
+    std::atomic<size_t> m_size;
 };
 
-} 
+}

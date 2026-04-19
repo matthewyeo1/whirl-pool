@@ -37,6 +37,9 @@ if(BUILD_BENCHMARKS)
     find_package(benchmark REQUIRED)
     add_executable(bench_pool benchmarks/bench_pool.cpp)
     target_link_libraries(bench_pool whirlpool benchmark::benchmark)
+
+    add_executable(bench_hashmap benchmarks/bench_hashmap.cpp)
+    target_link_libraries(bench_hashmap whirlpool benchmark::benchmark)
     
     if(MSVC)
         target_compile_options(bench_pool PRIVATE /O2)

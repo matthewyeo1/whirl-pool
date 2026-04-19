@@ -26,6 +26,18 @@ jobs:
       run: |
         ./build_ci/tests --gtest_filter="test_pool_*"
 
+    - name: Run RingBuffer tests
+      run: |
+        ./build_ci/tests --gtest_filter="test_ring_buffer_*"
+
+    - name: Run HashMap tests
+      run: |
+        ./build_ci/tests --gtest_filter="test_hashmap_*"
+
+    - name: Run Counter tests
+      run: |
+        ./build_ci/tests --gtest_filter="test_counter_*"
+
   test-windows:
     runs-on: windows-latest
     steps:
@@ -60,4 +72,5 @@ jobs:
     
     - name: Run MPMC multi producer multi consumer
       run: ./build_ci/Release/tests.exe --gtest_filter="test_mpmc_multi_producer_multi_consumer"
+
     

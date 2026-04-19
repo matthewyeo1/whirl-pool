@@ -70,7 +70,6 @@ std::vector<TestCase>& get_tests() {
     }
 
 // ============ TESTS ============
-
 TEST_CASE(test_pool_basic) {
     lockfree::ObjectPool<TestObject, 100> pool;
 
@@ -583,7 +582,294 @@ TEST_CASE(test_ring_buffer_wraparound) {
     return true;
 }
 
-// (removed smoke test)
+TEST_CASE(test_hashmap_large_capacity) {
+    lockfree::HashMap<uint64_t, uint64_t, 16384> map;  
+    
+    // Insert 2K items (50% load factor)
+    for (uint64_t i = 0; i < 2000; i++) {
+        ASSERT(map.insert(i, i * 100));
+    }
+    
+    ASSERT_EQ(map.size(), 2000);
+    
+    // Verify all inserted
+    for (uint64_t i = 0; i < 2000; i++) {
+        auto val = map.find(i);
+        ASSERT(val.has_value());
+        ASSERT_EQ(*val, i * 100);
+    }
+    
+    return true;
+}
+
+TEST_CASE(test_hashmap_collision_handling) {
+    lockfree::HashMap<int, int, 16> map;  // Very small capacity to force collisions
+    
+    // Insert keys that will collide
+    for (int i = 0; i < 14; i++) {
+        ASSERT(map.insert(i, i * 10));
+    }
+    
+    ASSERT_EQ(map.size(), 14);
+    
+    // Verify all found
+    for (int i = 0; i < 14; i++) {
+        auto val = map.find(i);
+        ASSERT(val.has_value());
+        ASSERT_EQ(*val, i * 10);
+    }
+    
+    // Update existing keys
+    for (int i = 0; i < 14; i++) {
+        ASSERT(map.insert(i, i * 20));
+    }
+    
+    // Verify updates
+    for (int i = 0; i < 14; i++) {
+        auto val = map.find(i);
+        ASSERT(val.has_value());
+        ASSERT_EQ(*val, i * 20);
+    }
+    
+    return true;
+}
+
+TEST_CASE(test_hashmap_erase_reinsert) {
+    lockfree::HashMap<int, int, 1024> map;
+    
+    // Insert
+    for (int i = 0; i < 100; i++) {
+        ASSERT(map.insert(i, i));
+    }
+    
+    // Erase half
+    for (int i = 0; i < 50; i++) {
+        ASSERT(map.erase(i));
+    }
+    
+    ASSERT_EQ(map.size(), 50);
+    
+    // Re-insert erased keys
+    for (int i = 0; i < 50; i++) {
+        ASSERT(map.insert(i, i * 100));
+    }
+    
+    ASSERT_EQ(map.size(), 100);
+    
+    // Verify all
+    for (int i = 0; i < 100; i++) {
+        auto val = map.find(i);
+        ASSERT(val.has_value());
+        if (i < 50) {
+            ASSERT_EQ(*val, i * 100);  // Re-inserted
+        } else {
+            ASSERT_EQ(*val, i);         // Original
+        }
+    }
+    
+    return true;
+}
+
+TEST_CASE(test_hashmap_update_value) {
+    lockfree::HashMap<int, int, 1024> map;
+    
+    map.insert(42, 100);
+    ASSERT_EQ(map.find(42).value(), 100);
+    
+    map.insert(42, 200);
+    ASSERT_EQ(map.find(42).value(), 200);
+    
+    map.insert(42, 300);
+    ASSERT_EQ(map.find(42).value(), 300);
+    ASSERT_EQ(map.size(), 1);  // Size should not increase
+    
+    return true;
+}
+
+TEST_CASE(test_hashmap_contains) {
+    lockfree::HashMap<int, int, 1024> map;
+    
+    map.insert(10, 100);
+    map.insert(20, 200);
+    
+    ASSERT(map.contains(10));
+    ASSERT(map.contains(20));
+    ASSERT(!map.contains(30));
+    ASSERT(!map.contains(999));
+    
+    map.erase(10);
+    ASSERT(!map.contains(10));
+    ASSERT(map.contains(20));
+    
+    return true;
+}
+
+TEST_CASE(test_hashmap_empty_and_clear) {
+    lockfree::HashMap<int, int, 1024> map;
+    
+    ASSERT(map.empty());
+    ASSERT_EQ(map.size(), 0);
+    
+    map.insert(1, 100);
+    map.insert(2, 200);
+    ASSERT(!map.empty());
+    ASSERT_EQ(map.size(), 2);
+    
+    map.erase(1);
+    map.erase(2);
+    ASSERT(map.empty());
+    ASSERT_EQ(map.size(), 0);
+    
+    return true;
+}
+
+TEST_CASE(test_hashmap_mixed_types) {
+    lockfree::HashMap<std::string, double, 1024> map;
+    
+    map.insert("apple", 1.23);
+    map.insert("banana", 4.56);
+    map.insert("cherry", 7.89);
+    
+    auto val = map.find("banana");
+    ASSERT(val.has_value());
+    ASSERT_EQ(*val, 4.56);
+    
+    ASSERT(!map.find("grape").has_value());
+    ASSERT_EQ(map.size(), 3);
+    
+    map.insert("apple", 9.99);  // Update
+    val = map.find("apple");
+    ASSERT(val.has_value());
+    ASSERT_EQ(*val, 9.99);
+    ASSERT_EQ(map.size(), 3);  // Size unchanged
+    
+    return true;
+}
+
+TEST_CASE(test_hashmap_edge_keys) {
+    lockfree::HashMap<int, int, 1024> map;
+    
+    // Test with 0
+    map.insert(0, 999);
+    auto val = map.find(0);
+    ASSERT(val.has_value());
+    ASSERT_EQ(*val, 999);
+    
+    // Test with negative keys (if int is signed)
+    map.insert(-1, 777);
+    val = map.find(-1);
+    ASSERT(val.has_value());
+    ASSERT_EQ(*val, 777);
+    
+    // Test with max int
+    map.insert(2147483647, 555);
+    val = map.find(2147483647);
+    ASSERT(val.has_value());
+    ASSERT_EQ(*val, 555);
+    
+    ASSERT_EQ(map.size(), 3);
+    
+    return true;
+}
+
+TEST_CASE(test_hashmap_concurrent_insert_find) {
+    lockfree::HashMap<int, int, 16384> map;
+    const int NUM_THREADS = 4;
+    const int OPS_PER_THREAD = 2500;
+    std::atomic<bool> start{false};
+    std::atomic<int> errors{0};
+    
+    std::vector<std::thread> threads;
+    
+    for (int t = 0; t < NUM_THREADS; t++) {
+        threads.emplace_back([&, t]() {
+            while (!start) std::this_thread::yield();
+            
+            for (int i = 0; i < OPS_PER_THREAD; i++) {
+                int key = t * OPS_PER_THREAD + i;
+                map.insert(key, key * 10);
+                
+                // Verify immediately
+                auto val = map.find(key);
+                if (!val.has_value() || *val != key * 10) {
+                    errors++;
+                }
+            }
+        });
+    }
+    
+    start = true;
+    for (auto& th : threads) th.join();
+    
+    ASSERT_EQ(errors, 0);
+    ASSERT_EQ(map.size(), NUM_THREADS * OPS_PER_THREAD);
+    
+    return true;
+}
+
+TEST_CASE(test_hashmap_string_keys) {
+    lockfree::HashMap<std::string, int, 1024> map;
+    
+    // Insert with string keys
+    map.insert("order_12345", 100);
+    map.insert("order_67890", 200);
+    map.insert("trade_ABC", 300);
+    
+    auto val = map.find("order_67890");
+    ASSERT(val.has_value());
+    ASSERT_EQ(*val, 200);
+    
+    // Update string key
+    map.insert("order_12345", 999);
+    val = map.find("order_12345");
+    ASSERT(val.has_value());
+    ASSERT_EQ(*val, 999);
+    
+    // Erase
+    map.erase("trade_ABC");
+    ASSERT(!map.contains("trade_ABC"));
+    ASSERT_EQ(map.size(), 2);
+    
+    return true;
+}
+
+TEST_CASE(test_hashmap_load_factor) {
+    lockfree::HashMap<int, int, 1024> map;
+    
+    // Fill to ~90% capacity
+    for (int i = 0; i < 900; i++) {
+        ASSERT(map.insert(i, i));
+    }
+    
+    ASSERT_EQ(map.size(), 900);
+    
+    // Should still work
+    for (int i = 0; i < 900; i++) {
+        auto val = map.find(i);
+        ASSERT(val.has_value());
+        ASSERT_EQ(*val, i);
+    }
+    
+    // Should still allow inserts
+    for (int i = 900; i < 950; i++) {
+        ASSERT(map.insert(i, i));
+    }
+    ASSERT_EQ(map.size(), 950);
+    
+    // Should allow updates
+    for (int i = 0; i < 950; i++) {
+        ASSERT(map.insert(i, i * 2));
+    }
+    
+    // Verify updates
+    for (int i = 0; i < 950; i++) {
+        auto val = map.find(i);
+        ASSERT(val.has_value());
+        ASSERT_EQ(*val, i * 2);
+    }
+    
+    return true;
+}
 
 // ============ MAIN ============
 int main(int argc, char** argv) {

@@ -18,25 +18,10 @@ jobs:
     - name: Build
       run: cmake --build build_ci --config Release
     
-    - name: Run SPSC tests
+    - name: Run tests (skip MPMC and Stack)
       run: |
-        ./build_ci/tests --gtest_filter="test_spsc_*"
-
-    - name: Run Pool tests
-      run: |
-        ./build_ci/tests --gtest_filter="test_pool_*"
-
-    - name: Run RingBuffer tests
-      run: |
-        ./build_ci/tests --gtest_filter="test_ring_buffer_*"
-
-    - name: Run HashMap tests
-      run: |
-        ./build_ci/tests --gtest_filter="test_hashmap_*"
-
-    - name: Run Counter tests
-      run: |
-        ./build_ci/tests --gtest_filter="test_counter_*"
+        # Run all tests except MPMC and Stack variants on Linux to avoid known hangs
+        ./build_ci/tests --gtest_filter="*-test_mpmc_*:test_stack_*"
 
   test-windows:
     runs-on: windows-latest

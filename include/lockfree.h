@@ -8,3 +8,4 @@
 #include "lockfree/ringbuffer.hpp"
 #include "lockfree/hashmap.hpp"
 #include "lockfree/counter.hpp"
+#include "lockfree/rcu.hpp"

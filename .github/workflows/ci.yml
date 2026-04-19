@@ -18,59 +18,25 @@ jobs:
     - name: Build
       run: cmake --build build_ci --config Release
     
-    - name: Run SPSC tests
+    - name: Run tests (skip MPMC and Stack)
       run: |
-        ./build_ci/tests --gtest_filter="test_spsc_*"
-
-    - name: Run Pool tests
-      run: |
-        ./build_ci/tests --gtest_filter="test_pool_*"
-
-    - name: Run RingBuffer tests
-      run: |
-        ./build_ci/tests --gtest_filter="test_ring_buffer_*"
-
-    - name: Run HashMap tests
-      run: |
-        ./build_ci/tests --gtest_filter="test_hashmap_*"
-
-    - name: Run Counter tests
-      run: |
-        ./build_ci/tests --gtest_filter="test_counter_*"
+        # Run all relevant tests on Linux; explicitly include test groups except MPMC and Stack
+        ./build_ci/tests --gtest_filter="test_pool_*:test_spsc_*:test_ring_buffer_*:test_hashmap_*:test_counter_*:test_rcu_*:test_simple_rcu_*"
 
   test-windows:
     runs-on: windows-latest
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Configure
       run: cmake -B build_ci -DBUILD_TESTS=ON -DBUILD_BENCHMARKS=OFF -DCI_BUILD=ON
-    
+
     - name: Build
       run: cmake --build build_ci --config Release
-    
-    - name: Run SPSC tests
-      run: ./build_ci/Release/tests.exe --gtest_filter="test_spsc_*"
-    
-    - name: Run Pool tests
-      run: ./build_ci/Release/tests.exe --gtest_filter="test_pool_*"
-    
-    - name: Run Stack tests
-      run: ./build_ci/Release/tests.exe --gtest_filter="test_stack_*"
-    
-    - name: Run MPMC basic
-      run: ./build_ci/Release/tests.exe --gtest_filter="test_mpmc_basic"
-    
-    - name: Run MPMC empty
-      run: ./build_ci/Release/tests.exe --gtest_filter="test_mpmc_empty"
-    
-    - name: Run MPMC single producer single consumer
-      run: ./build_ci/Release/tests.exe --gtest_filter="test_mpmc_single_producer_single_consumer"
-    
-    - name: Run MPMC multi producer single consumer
-      run: ./build_ci/Release/tests.exe --gtest_filter="test_mpmc_multi_producer_single_consumer"
-    
-    - name: Run MPMC multi producer multi consumer
-      run: ./build_ci/Release/tests.exe --gtest_filter="test_mpmc_multi_producer_multi_consumer"
+
+    - name: Run all tests
+      run: |
+        # Run the full test suite on Windows (includes MPMC and Stack tests)
+        ./build_ci/Release/tests.exe
 
     

@@ -20,6 +20,22 @@ struct TestObject {
     explicit TestObject(int v) : value(v) {}
 };
 
+struct InstrumentConfig {
+    std::string symbol;
+    double min_tick;
+    uint32_t lot_size;
+    double min_quantity;
+    bool is_active;
+    
+    InstrumentConfig() 
+        : symbol(""), min_tick(0.01), lot_size(100), 
+          min_quantity(1.0), is_active(true) {}
+    
+    InstrumentConfig(const std::string& sym, double tick, uint32_t lot, double min_qty, bool active)
+        : symbol(sym), min_tick(tick), lot_size(lot), 
+          min_quantity(min_qty), is_active(active) {}
+};
+
 std::vector<TestCase>& get_tests() {
     static std::vector<TestCase> tests;
     return tests;
@@ -48,6 +64,12 @@ std::vector<TestCase>& get_tests() {
 #define ASSERT_LT(a, b) \
     if (!((a) < (b))) { \
         std::cerr << "  FAIL: " << #a << " (" << a << ") >= " << #b << " (" << b << ") line " << __LINE__ << std::endl; \
+        return false; \
+    }
+
+#define ASSERT_GT(a, b) \
+    if (!((a) > (b))) { \
+        std::cerr << "  FAIL: " << #a << " (" << a << ") <= " << #b << " (" << b << ") line " << __LINE__ << std::endl; \
         return false; \
     }
 
@@ -354,7 +376,7 @@ TEST_CASE(test_mpmc_empty) {
 TEST_CASE(test_stack_basic) {
     lockfree::TStack<int> stack;
     
-    stack.push(42);
+    stack.push(67);
     stack.push(100);
     
     auto val = stack.pop();
@@ -363,7 +385,7 @@ TEST_CASE(test_stack_basic) {
     
     val = stack.pop();
     ASSERT(val.has_value());
-    ASSERT_EQ(*val, 42);
+    ASSERT_EQ(*val, 67);
     
     ASSERT(!stack.pop().has_value());
     return true;
@@ -455,13 +477,13 @@ TEST_CASE(test_ring_buffer_basic) {
     ASSERT(buffer.empty());
     ASSERT(!buffer.full());
     
-    ASSERT(buffer.push(42));
+    ASSERT(buffer.push(67));
     ASSERT(!buffer.empty());
     ASSERT_EQ(buffer.size(), 1);
     
     auto val = buffer.pop();
     ASSERT(val.has_value());
-    ASSERT_EQ(*val, 42);
+    ASSERT_EQ(*val, 67);
     ASSERT(buffer.empty());
     
     return true;
@@ -640,14 +662,14 @@ TEST_CASE(test_hashmap_erase_reinsert) {
 TEST_CASE(test_hashmap_update_value) {
     lockfree::HashMap<int, int, 1024> map;
     
-    map.insert(42, 100);
-    ASSERT_EQ(map.find(42).value(), 100);
+    map.insert(67, 100);
+    ASSERT_EQ(map.find(67).value(), 100);
     
-    map.insert(42, 200);
-    ASSERT_EQ(map.find(42).value(), 200);
+    map.insert(67, 200);
+    ASSERT_EQ(map.find(67).value(), 200);
     
-    map.insert(42, 300);
-    ASSERT_EQ(map.find(42).value(), 300);
+    map.insert(67, 300);
+    ASSERT_EQ(map.find(67).value(), 300);
     ASSERT_EQ(map.size(), 1);  // Size should not increase
     
     return true;
@@ -927,6 +949,187 @@ TEST_CASE(test_counter_order_id_generator) {
     // IDs should be unique and increasing
     ASSERT_LT(id1, id2);
     ASSERT_LT(id2, id3);
+    
+    return true;
+}
+
+TEST_CASE(test_rcu_basic) {
+    lockfree::RCU<InstrumentConfig> rcu(InstrumentConfig("AAPL", 0.01, 100, 1.0, true));
+    
+    auto ptr = rcu.read();
+    ASSERT_EQ(ptr->symbol, "AAPL");
+    ASSERT_EQ(ptr->min_tick, 0.01);
+    ASSERT_EQ(ptr->lot_size, 100);
+    ASSERT_EQ(ptr->is_active, true);
+    
+    return true;
+}
+
+TEST_CASE(test_rcu_update) {
+    lockfree::RCU<InstrumentConfig> rcu(InstrumentConfig("AAPL", 0.01, 100, 1.0, true));
+    
+    // Update config
+    rcu.update(InstrumentConfig("AAPL", 0.005, 1, 0.01, true));
+    
+    auto ptr = rcu.read();
+    ASSERT_EQ(ptr->min_tick, 0.005);
+    ASSERT_EQ(ptr->lot_size, 1);
+    ASSERT_EQ(ptr->min_quantity, 0.01);
+    
+    return true;
+}
+
+TEST_CASE(test_rcu_modify) {
+    lockfree::RCU<InstrumentConfig> rcu(InstrumentConfig("AAPL", 0.01, 100, 1.0, true));
+    
+    rcu.modify([](InstrumentConfig& cfg) {
+        cfg.min_tick = 0.005;
+        cfg.lot_size = 1;
+        cfg.min_quantity = 0.01;
+    });
+    
+    auto ptr = rcu.read();
+    ASSERT_EQ(ptr->min_tick, 0.005);
+    ASSERT_EQ(ptr->lot_size, 1);
+    ASSERT_EQ(ptr->min_quantity, 0.01);
+    
+    return true;
+}
+
+TEST_CASE(test_rcu_multi_reader) {
+    lockfree::RCU<int> rcu(67);
+    std::vector<std::thread> readers;
+    std::atomic<int> errors{0};
+    
+    // Start multiple readers
+    for (int i = 0; i < 10; i++) {
+        readers.emplace_back([&]() {
+            for (int j = 0; j < 10000; j++) {
+                auto ptr = rcu.read();
+                int val = *ptr;
+                if (val != 67 && val != 100) {
+                    errors++;
+                }
+            }
+        });
+    }
+    
+    // Update while readers are reading
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    rcu.update(100);
+    
+    for (auto& th : readers) th.join();
+    
+    ASSERT_EQ(errors, 0);
+    
+    return true;
+}
+
+TEST_CASE(test_rcu_get) {
+    lockfree::RCU<int> rcu(67);
+    ASSERT_EQ(rcu.get(), 67);
+    
+    rcu.update(100);
+    ASSERT_EQ(rcu.get(), 100);
+    
+    return true;
+}
+
+TEST_CASE(test_rcu_valid) {
+    lockfree::RCU<int> rcu;
+    ASSERT(rcu.valid());
+    
+    return true;
+}
+
+TEST_CASE(test_simple_rcu_basic) {
+    lockfree::SimpleRCU<InstrumentConfig> rcu(InstrumentConfig("MSFT", 0.01, 100, 1.0, true));
+    
+    auto ptr = rcu.read();
+    ASSERT_EQ(ptr->symbol, "MSFT");
+    
+    rcu.update(InstrumentConfig("MSFT", 0.005, 1, 0.01, true));
+    ptr = rcu.read();
+    ASSERT_EQ(ptr->min_tick, 0.005);
+    
+    return true;
+}
+
+TEST_CASE(test_simple_rcu_modify) {
+    lockfree::SimpleRCU<int> rcu(67);
+    
+    rcu.update([](int& val) {
+        val = 100;
+    });
+    
+    ASSERT_EQ(rcu.get(), 100);
+    
+    return true;
+}
+
+TEST_CASE(test_rcu_trading_scenario) {
+    // Simulate trading engine with dynamic symbol configuration updates
+    lockfree::RCU<InstrumentConfig> symbol_configs[3] = {
+        lockfree::RCU<InstrumentConfig>(InstrumentConfig("AAPL", 0.01, 100, 1.0, true)),
+        lockfree::RCU<InstrumentConfig>(InstrumentConfig("GOOGL", 0.01, 100, 1.0, true)),
+        lockfree::RCU<InstrumentConfig>(InstrumentConfig("MSFT", 0.01, 100, 1.0, true))
+    };
+    
+    std::atomic<int> trades_executed{0};
+    std::atomic<int> errors{0};
+    
+    // Simulate trading threads reading configs
+    std::vector<std::thread> trading_threads;
+    for (int t = 0; t < 8; t++) {
+        trading_threads.emplace_back([&, t]() {
+            for (int i = 0; i < 10000; i++) {
+                int idx = i % 3;
+                auto cfg = symbol_configs[idx].read();
+                
+                // Validate config consistency
+                if (cfg->min_tick <= 0 || cfg->lot_size == 0 || !cfg->is_active) {
+                    errors++;
+                }
+                trades_executed++;
+            }
+        });
+    }
+    
+    // Simulate admin thread updating configs (rare operation)
+    std::thread admin_thread([&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        
+        // Update AAPL config
+        symbol_configs[0].update(InstrumentConfig("AAPL", 0.005, 1, 0.01, true));
+        
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        
+        // Disable GOOGL trading
+        symbol_configs[1].update(InstrumentConfig("GOOGL", 0.01, 100, 1.0, false));
+        
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        
+        // Update MSFT lot size
+        symbol_configs[2].modify([](InstrumentConfig& cfg) {
+            cfg.lot_size = 50;
+            cfg.min_tick = 0.005;
+        });
+    });
+    
+    for (auto& th : trading_threads) th.join();
+    admin_thread.join();
+    
+    ASSERT_EQ(errors, 0);
+    ASSERT_GT(trades_executed, 0);
+    
+    // Verify final configs
+    auto aapl = symbol_configs[0].read();
+    auto googl = symbol_configs[1].read();
+    auto msft = symbol_configs[2].read();
+    
+    ASSERT_EQ(aapl->min_tick, 0.005);
+    ASSERT_EQ(googl->is_active, false);
+    ASSERT_EQ(msft->lot_size, 50);
     
     return true;
 }

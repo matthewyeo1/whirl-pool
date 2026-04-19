@@ -34,6 +34,18 @@ private:
         HazardPointer() : owner(std::thread::id()), pointer(nullptr) {}
     };
 
+    struct ThreadHPGuard {
+        ~ThreadHPGuard() {
+            if (local_hp) {
+                local_hp->pointer.store(nullptr, std::memory_order_release);
+                local_hp->owner.store(std::thread::id(), std::memory_order_release);
+                local_hp = nullptr;
+            }
+            retired_nodes.clear();
+        }
+    };
+    static thread_local ThreadHPGuard hp_guard;
+
     static constexpr int MAX_HAZARD_POINTERS = 128;
     static std::array<HazardPointer, MAX_HAZARD_POINTERS> h_ptrs;
     
@@ -50,6 +62,7 @@ private:
 
     // Get this thread's hazard pointer slot
     static HazardPointer* get_hazard_pointer() {
+        (void)hp_guard;
         if (local_hp) return local_hp;
         
         auto id = std::this_thread::get_id();
@@ -228,21 +241,6 @@ public:
         }
         return count;
     }
-
-    // Reset all hazard pointer states (for testing)
-    static void reset_for_testing() {
-        for (auto& hp : h_ptrs) {
-            hp.owner.store(std::thread::id(), std::memory_order_release);
-            hp.pointer.store(nullptr, std::memory_order_release);
-        }
-
-        // Clear thread-local retired nodes for this thread
-        for (Node* n : retired_nodes) delete n;
-        retired_nodes.clear();
-
-        // Clear cached local hazard pointer for this thread
-        local_hp = nullptr;
-    }
 };
 
 template<typename T>
@@ -255,4 +253,6 @@ thread_local std::vector<typename TStack<T>::Node*> TStack<T>::retired_nodes;
 template<typename T>
 thread_local typename TStack<T>::HazardPointer* TStack<T>::local_hp = nullptr;
 
+template<typename T>
+thread_local typename TStack<T>::ThreadHPGuard TStack<T>::hp_guard;
 } 

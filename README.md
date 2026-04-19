@@ -46,6 +46,9 @@ make
 ```
 
 ## Run Benchmarks
+
+Example: running benchmark for lock-free pool
+
 ```
 cd build
 cmake .. -DBUILD_BENCHMARKS=ON -DCMAKE_TOOLCHAIN_FILE=C:/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake

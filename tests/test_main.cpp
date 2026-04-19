@@ -45,28 +45,10 @@ std::vector<TestCase>& get_tests() {
         return false; \
     }
 
-// After each MPMC test, reset the hazard pointers
-#define MPMC_TEST_CASE(name) \
-    TEST_CASE(name) { \
-        bool result = false; \
-        { \
-            lockfree::MPMCQueue<int>::reset_for_testing(); \
-            result = name(); \
-        } \
-        lockfree::MPMCQueue<int>::reset_for_testing(); \
-        return result; \
-    }
-
-// After each stack test, reset the hazard pointers (test-only)
-#define STACK_TEST_CASE(name) \
-    TEST_CASE(name) { \
-        bool result = false; \
-        { \
-            lockfree::TStack<int>::reset_for_testing(); \
-            result = name(); \
-        } \
-        lockfree::TStack<int>::reset_for_testing(); \
-        return result; \
+#define ASSERT_LT(a, b) \
+    if (!((a) < (b))) { \
+        std::cerr << "  FAIL: " << #a << " (" << a << ") >= " << #b << " (" << b << ") line " << __LINE__ << std::endl; \
+        return false; \
     }
 
 // ============ TESTS ============
@@ -221,9 +203,7 @@ TEST_CASE(test_spsc_threaded) {
     return true;
 }
 
-
 TEST_CASE(test_mpmc_basic) {
-    lockfree::MPMCQueue<int>::reset_for_testing();
     lockfree::MPMCQueue<int> queue;
     
     queue.push(67);
@@ -243,7 +223,6 @@ TEST_CASE(test_mpmc_basic) {
 }
 
 TEST_CASE(test_mpmc_multi_producer_multi_consumer) {
-    lockfree::MPMCQueue<int>::reset_for_testing();
     lockfree::MPMCQueue<int> queue;
     const int NUM_PRODUCERS = 4;
     const int NUM_CONSUMERS = 4;
@@ -288,7 +267,6 @@ TEST_CASE(test_mpmc_multi_producer_multi_consumer) {
 }
 
 TEST_CASE(test_mpmc_single_producer_single_consumer) {
-    lockfree::MPMCQueue<int>::reset_for_testing();
     lockfree::MPMCQueue<int> queue;
     const int NUM_ITEMS = 50000;
     
@@ -316,7 +294,6 @@ TEST_CASE(test_mpmc_single_producer_single_consumer) {
 }
 
 TEST_CASE(test_mpmc_multi_producer_single_consumer) {
-    lockfree::MPMCQueue<int>::reset_for_testing();
     lockfree::MPMCQueue<int> queue;
     const int NUM_PRODUCERS = 4;
     const int ITEMS_PER_PRODUCER = 10000;
@@ -375,8 +352,6 @@ TEST_CASE(test_mpmc_empty) {
 }
 
 TEST_CASE(test_stack_basic) {
-    // Reset hazard pointers for test isolation
-    lockfree::TStack<int>::reset_for_testing();
     lockfree::TStack<int> stack;
     
     stack.push(42);
@@ -391,13 +366,10 @@ TEST_CASE(test_stack_basic) {
     ASSERT_EQ(*val, 42);
     
     ASSERT(!stack.pop().has_value());
-    // Cleanup
-    lockfree::TStack<int>::reset_for_testing();
     return true;
 }
 
 TEST_CASE(test_stack_single_producer_single_consumer) {
-    lockfree::TStack<int>::reset_for_testing();
     lockfree::TStack<int> stack;
     const int NUM_ITEMS = 50000;
     
@@ -420,12 +392,10 @@ TEST_CASE(test_stack_single_producer_single_consumer) {
     
     producer.join();
     consumer.join();
-    lockfree::TStack<int>::reset_for_testing();
     return true;
 }
 
 TEST_CASE(test_stack_multi_producer_multi_consumer) {
-    lockfree::TStack<int>::reset_for_testing();
     lockfree::TStack<int> stack;
     const int NUM_PRODUCERS = 4;
     const int NUM_CONSUMERS = 4;
@@ -464,12 +434,10 @@ TEST_CASE(test_stack_multi_producer_multi_consumer) {
     for (auto& t : producers) t.join();
     for (auto& t : consumers) t.join();
     ASSERT_EQ(consumed, TOTAL_ITEMS);
-    lockfree::TStack<int>::reset_for_testing();
     return true;
 }
 
 TEST_CASE(test_stack_empty) {
-    lockfree::TStack<int>::reset_for_testing();
     lockfree::TStack<int> stack;
     ASSERT(stack.empty());
     
@@ -478,7 +446,6 @@ TEST_CASE(test_stack_empty) {
     
     stack.pop();
     ASSERT(stack.empty());
-    lockfree::TStack<int>::reset_for_testing();
     return true;
 }
 
@@ -867,6 +834,99 @@ TEST_CASE(test_hashmap_load_factor) {
         ASSERT(val.has_value());
         ASSERT_EQ(*val, i * 2);
     }
+    
+    return true;
+}
+
+TEST_CASE(test_counter_basic) {
+    lockfree::AtomicCounter<uint64_t> counter;
+    
+    ASSERT_EQ(counter.current(), 0);
+    ASSERT_EQ(counter.next(), 0);
+    ASSERT_EQ(counter.current(), 1);
+    ASSERT_EQ(counter.next(), 1);
+    ASSERT_EQ(counter.current(), 2);
+    ASSERT_EQ(counter.next(), 2);
+    ASSERT_EQ(counter.current(), 3);
+    
+    return true;
+}
+
+TEST_CASE(test_counter_initial_value) {
+    lockfree::AtomicCounter<uint64_t> counter(1000);
+    
+    ASSERT_EQ(counter.current(), 1000);
+    ASSERT_EQ(counter.next(), 1000);
+    ASSERT_EQ(counter.current(), 1001);
+    
+    return true;
+}
+
+TEST_CASE(test_counter_reset) {
+    lockfree::AtomicCounter<uint64_t> counter;
+    
+    counter.next();
+    counter.next();
+    counter.next();
+    ASSERT_EQ(counter.current(), 3);
+    
+    counter.reset();
+    ASSERT_EQ(counter.current(), 0);
+    ASSERT_EQ(counter.next(), 0);
+    
+    return true;
+}
+
+TEST_CASE(test_counter_add) {
+    lockfree::AtomicCounter<uint64_t> counter;
+    
+    ASSERT_EQ(counter.add(5), 0);
+    ASSERT_EQ(counter.current(), 5);
+    ASSERT_EQ(counter.add(3), 5);
+    ASSERT_EQ(counter.current(), 8);
+    
+    return true;
+}
+
+TEST_CASE(test_counter_multi_threaded) {
+    lockfree::AtomicCounter<uint64_t> counter;
+    const int NUM_THREADS = 8;
+    const int ITERS_PER_THREAD = 10000;
+    std::atomic<int> errors{0};
+    
+    std::vector<std::thread> threads;
+    for (int t = 0; t < NUM_THREADS; t++) {
+        threads.emplace_back([&]() {
+            for (int i = 0; i < ITERS_PER_THREAD; i++) {
+                uint64_t val = counter.next();
+                if (val < 0) errors++;
+            }
+        });
+    }
+    
+    for (auto& th : threads) th.join();
+    
+    ASSERT_EQ(errors, 0);
+    ASSERT_EQ(counter.current(), NUM_THREADS * ITERS_PER_THREAD);
+    
+    return true;
+}
+
+TEST_CASE(test_counter_order_id_generator) {
+    lockfree::OrderIDGenerator order_id;
+    
+    // Simulate order creation
+    uint64_t id1 = order_id.next();
+    uint64_t id2 = order_id.next();
+    uint64_t id3 = order_id.next();
+    
+    ASSERT_EQ(id1, 0);
+    ASSERT_EQ(id2, 1);
+    ASSERT_EQ(id3, 2);
+    
+    // IDs should be unique and increasing
+    ASSERT_LT(id1, id2);
+    ASSERT_LT(id2, id3);
     
     return true;
 }

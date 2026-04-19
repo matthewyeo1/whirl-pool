@@ -20,8 +20,8 @@ jobs:
     
     - name: Run tests (skip MPMC and Stack)
       run: |
-        # Run all tests except MPMC and Stack variants on Linux to avoid known hangs
-        ./build_ci/tests --gtest_filter="* -test_mpmc_*:test_stack_*"
+        # Run only non-flaky tests
+        ./build_ci/tests --gtest_filter="-test_mpmc_*:-test_stack_*"
 
   test-windows:
     runs-on: windows-latest

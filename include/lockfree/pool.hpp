@@ -66,7 +66,7 @@ public:
         Block* block = pop_free_list();
         
         if (!block) {
-            return PooledPtr<T, Capacity>(nullptr, *this);
+            return PooledPtr<T, Capacity>();
         }
 
         // Construct object in place
@@ -139,49 +139,63 @@ private:
 template<typename T, size_t Capacity>
 class PooledPtr {
 public:
-    explicit PooledPtr(T* ptr, ObjectPool<T, Capacity>& pool, 
+    // Default constructor — null state, no pool
+    PooledPtr() : m_ptr(nullptr), m_pool(nullptr), m_block(nullptr) {}
+
+    explicit PooledPtr(T* ptr, ObjectPool<T, Capacity>& pool,
         typename ObjectPool<T, Capacity>::Block* block = nullptr)
-        : m_ptr(ptr), m_pool(pool), m_block(block) {}
-    
+        : m_ptr(ptr), m_pool(&pool), m_block(block) {}
+
     ~PooledPtr() {
-        if (m_ptr) m_pool.release(m_ptr, m_block);
+        if (m_ptr && m_pool) m_pool->release(m_ptr, m_block);
     }
-    
+
     // Move constructor
     PooledPtr(PooledPtr&& other) noexcept
         : m_ptr(other.m_ptr), m_pool(other.m_pool), m_block(other.m_block) {
-        other.m_ptr = nullptr;
+        other.m_ptr   = nullptr;
+        other.m_pool  = nullptr;
         other.m_block = nullptr;
     }
 
     // Move assignment
     PooledPtr& operator=(PooledPtr&& other) noexcept {
         if (this != &other) {
-            if (m_ptr) m_pool.release(m_ptr, m_block);
-
-            m_ptr = other.m_ptr;
-            m_pool = other.m_pool;
+            if (m_ptr && m_pool) m_pool->release(m_ptr, m_block);
+            m_ptr   = other.m_ptr;
+            m_pool  = other.m_pool;
             m_block = other.m_block;
-            other.m_ptr = nullptr;
+            other.m_ptr   = nullptr;
+            other.m_pool  = nullptr;
             other.m_block = nullptr;
         }
         return *this;
     }
-    
+
+    // Release to pool manually
+    void release() {
+        if (m_ptr && m_pool) {
+            m_pool->release(m_ptr, m_block);
+            m_ptr   = nullptr;
+            m_pool  = nullptr;
+            m_block = nullptr;
+        }
+    }
+
     // No copying
     PooledPtr(const PooledPtr&) = delete;
     PooledPtr& operator=(const PooledPtr&) = delete;
-    
+
     T* operator->() { return m_ptr; }
     const T* operator->() const { return m_ptr; }
     T& operator*() { return *m_ptr; }
     const T& operator*() const { return *m_ptr; }
     T* get() { return m_ptr; }
     explicit operator bool() const { return m_ptr != nullptr; }
-    
+
 private:
-    T* m_ptr;
-    ObjectPool<T, Capacity>& m_pool;
+    T*                                      m_ptr;
+    ObjectPool<T, Capacity>*                m_pool;   // Pointer not reference
     typename ObjectPool<T, Capacity>::Block* m_block;
 };
 

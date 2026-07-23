@@ -291,6 +291,7 @@ TEST_CASE(test_mpmc_multi_producer_multi_consumer) {
 TEST_CASE(test_mpmc_single_producer_single_consumer) {
     lockfree::MPMCQueue<int> queue;
     const int NUM_ITEMS = 50000;
+    std::atomic<int> received{0};
     
     std::thread producer([&]() {
         for (int i = 0; i < NUM_ITEMS; i++) {
@@ -299,19 +300,18 @@ TEST_CASE(test_mpmc_single_producer_single_consumer) {
     });
     
     std::thread consumer([&]() {
-        int received = 0;
-        while (received < NUM_ITEMS) {
+        while (received.load(std::memory_order_relaxed) < NUM_ITEMS) {
             auto val = queue.pop();
             if (val.has_value()) {
-                received++;
+                received.fetch_add(1, std::memory_order_relaxed);
             }
         }
-        ASSERT_EQ(received, NUM_ITEMS);
     });
     
     producer.join();
     consumer.join();
-    
+
+    ASSERT_EQ(received.load(), NUM_ITEMS);
     return true;
 }
 
@@ -394,6 +394,7 @@ TEST_CASE(test_stack_basic) {
 TEST_CASE(test_stack_single_producer_single_consumer) {
     lockfree::TStack<int> stack;
     const int NUM_ITEMS = 50000;
+    std::atomic<int> received{0};
     
     std::thread producer([&]() {
         for (int i = 0; i < NUM_ITEMS; i++) {
@@ -402,18 +403,18 @@ TEST_CASE(test_stack_single_producer_single_consumer) {
     });
     
     std::thread consumer([&]() {
-        int received = 0;
-        while (received < NUM_ITEMS) {
+        while (received.load(std::memory_order_relaxed) < NUM_ITEMS) {
             auto val = stack.pop();
             if (val.has_value()) {
-                received++;
+                received.fetch_add(1, std::memory_order_relaxed);
             }
         }
-        ASSERT_EQ(received, NUM_ITEMS);
     });
     
     producer.join();
     consumer.join();
+
+    ASSERT_EQ(received.load(), NUM_ITEMS);
     return true;
 }
 
@@ -1081,7 +1082,7 @@ TEST_CASE(test_rcu_trading_scenario) {
     // Simulate trading threads reading configs
     std::vector<std::thread> trading_threads;
     for (int t = 0; t < 8; t++) {
-        trading_threads.emplace_back([&, t]() {
+        trading_threads.emplace_back([&]() {
             for (int i = 0; i < 10000; i++) {
                 int idx = i % 3;
                 auto cfg = symbol_configs[idx].read();
@@ -1134,6 +1135,38 @@ TEST_CASE(test_rcu_trading_scenario) {
     return true;
 }
 
+bool matches_filter(const std::string& name, const std::string& filter) {
+    if (filter.empty()) {
+        return true;
+    }
+
+    std::size_t begin = 0;
+    while (begin <= filter.size()) {
+        const std::size_t end = filter.find(':', begin);
+        const std::string pattern = filter.substr(
+            begin, end == std::string::npos ? end : end - begin);
+
+        if (!pattern.empty()) {
+            if (pattern.back() == '*') {
+                const std::string prefix =
+                    pattern.substr(0, pattern.size() - 1);
+                if (name.find(prefix) == 0) {
+                    return true;
+                }
+            } else if (name == pattern) {
+                return true;
+            }
+        }
+
+        if (end == std::string::npos) {
+            break;
+        }
+        begin = end + 1;
+    }
+
+    return false;
+}
+
 // ============ MAIN ============
 int main(int argc, char** argv) {
     std::string filter;
@@ -1157,15 +1190,7 @@ int main(int argc, char** argv) {
     // Build list of tests to run
     std::vector<TestCase> to_run;
     for (auto& test : tests) {
-        if (filter.empty()) {
-            to_run.push_back(test);
-        } else if (filter.back() == '*') {
-            // Wildcard match (e.g., "test_spsc_*")
-            std::string prefix = filter.substr(0, filter.length() - 1);
-            if (test.name.find(prefix) == 0) {
-                to_run.push_back(test);
-            }
-        } else if (test.name == filter) {
+        if (matches_filter(test.name, filter)) {
             to_run.push_back(test);
         }
     }
@@ -1175,6 +1200,11 @@ int main(int argc, char** argv) {
         std::cout << "Filter: " << filter << std::endl;
     }
     std::cout << "Running " << to_run.size() << " tests..." << std::endl << std::endl;
+
+    if (to_run.empty()) {
+        std::cerr << "No tests matched the requested filter." << std::endl;
+        return 1;
+    }
     
     int passed = 0;
     for (auto& test : to_run) {
@@ -1188,5 +1218,5 @@ int main(int argc, char** argv) {
     }
     
     std::cout << std::endl << "Results: " << passed << "/" << to_run.size() << " passed" << std::endl;
-    return passed == to_run.size() ? 0 : 1;
+    return static_cast<std::size_t>(passed) == to_run.size() ? 0 : 1;
 }

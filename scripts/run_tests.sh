@@ -1,24 +1,12 @@
-#!/bin/bash
-# Run all tests (excluding known flaky ones)
+#!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 
-cd "$(dirname "$0")/.."  
+project_dir="$(cd "$(dirname "$0")/.." && pwd)"
+build_dir="${project_dir}/build"
 
-if [ ! -f "build/Release/tests.exe" ] && [ ! -f "build/tests" ]; then
-    echo "Building tests..."
-    mkdir -p build
-    cd build
-    cmake .. -DBUILD_TESTS=ON
-    cmake --build . --config Release
-    cd ..
-fi
-
-echo "Running tests..."
-cd build
-
-if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]]; then
-    ./Release/tests.exe
-else
-    ./tests
-fi
+cmake -S "${project_dir}" -B "${build_dir}" \
+    -DWHIRLPOOL_BUILD_TESTS=ON \
+    -DWHIRLPOOL_BUILD_BENCHMARKS=OFF
+cmake --build "${build_dir}" --config Release --parallel
+ctest --test-dir "${build_dir}" -C Release --output-on-failure

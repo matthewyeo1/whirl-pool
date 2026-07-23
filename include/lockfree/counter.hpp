@@ -1,6 +1,7 @@
 #pragma once
 #include <atomic>
 #include <cstdint>
+#include <type_traits>
 #include "utils.hpp"
 
 namespace lockfree {

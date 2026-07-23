@@ -46,8 +46,6 @@ public:
 
     ~ObjectPool() {
         // Destroy any remaining objects
-        Block* block = m_free_list.load(std::memory_order_relaxed);
-
         for (size_t i = 0; i < Capacity; i++) {
             Block* block = reinterpret_cast<Block*>(m_memory + i * sizeof(Block));
             if (block->constructed) {

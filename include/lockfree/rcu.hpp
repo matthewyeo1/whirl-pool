@@ -110,7 +110,6 @@ public:
     }
 
     std::shared_ptr<const T> read() const {
-        uint64_t epoch = m_global_epoch.load(std::memory_order_acquire);
         EpochNode* node = m_head.load(std::memory_order_acquire);
 
         return node->data;
@@ -189,4 +188,4 @@ private:
     std::shared_ptr<T> m_ptr;
 };
 
-} 
+}

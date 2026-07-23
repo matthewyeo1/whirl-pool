@@ -64,7 +64,9 @@ target_include_directories(whirlpool INTERFACE
 
 function(whirlpool_apply_project_warnings target)
     if(MSVC)
-        target_compile_options(${target} PRIVATE /W4)
+        # C4324 reports the intentional tail padding produced by cache-line
+        # alignas declarations. The padding is part of the library's layout.
+        target_compile_options(${target} PRIVATE /W4 /wd4324)
         if(WHIRLPOOL_WARNINGS_AS_ERRORS)
             target_compile_options(${target} PRIVATE /WX)
         endif()

@@ -91,4 +91,4 @@ No queue, pool, hashmap, stack, RCU, or ring-buffer algorithm changed.
 - All 47 existing functional tests passed.
 - The repaired colon-separated filter selected and passed 18 supported tests; an empty match returned failure.
 - ASan/UBSan passed the contract API and the 18 supported pool/SPSC/ring/counter tests.
-- CMake configure, install/export, preset, and external-consumer execution remain unverified locally because `cmake` is unavailable; CI is the next executable verification point.
+- CMake configure/build and all six CTest checks passed locally with strict warnings, including install/export and external/subdirectory consumers. GCC and MSVC remain covered by CI.

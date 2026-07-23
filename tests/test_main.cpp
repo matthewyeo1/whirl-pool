@@ -915,21 +915,18 @@ TEST_CASE(test_counter_multi_threaded) {
     lockfree::AtomicCounter<uint64_t> counter;
     const int NUM_THREADS = 8;
     const int ITERS_PER_THREAD = 10000;
-    std::atomic<int> errors{0};
     
     std::vector<std::thread> threads;
     for (int t = 0; t < NUM_THREADS; t++) {
         threads.emplace_back([&]() {
             for (int i = 0; i < ITERS_PER_THREAD; i++) {
-                uint64_t val = counter.next();
-                if (val < 0) errors++;
+                (void)counter.next();
             }
         });
     }
     
     for (auto& th : threads) th.join();
     
-    ASSERT_EQ(errors, 0);
     ASSERT_EQ(counter.current(), NUM_THREADS * ITERS_PER_THREAD);
     
     return true;

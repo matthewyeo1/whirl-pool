@@ -1,10 +1,11 @@
-file(GLOB _whirlpool_public_headers CONFIGURE_DEPENDS
+file(GLOB_RECURSE _whirlpool_public_headers CONFIGURE_DEPENDS
     "${PROJECT_SOURCE_DIR}/include/lockfree/*.hpp")
 
 foreach(_header IN LISTS _whirlpool_public_headers)
-    get_filename_component(_header_name "${_header}" NAME_WE)
     file(RELATIVE_PATH _header_include
         "${PROJECT_SOURCE_DIR}/include" "${_header}")
+    string(REGEX REPLACE "[^A-Za-z0-9_]" "_"
+        _header_name "${_header_include}")
     set(_source
         "${CMAKE_CURRENT_BINARY_DIR}/header_${_header_name}.cpp")
     file(WRITE "${_source}"

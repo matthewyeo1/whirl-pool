@@ -2,41 +2,79 @@ name: CI
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
 
 jobs:
-  test-linux:
+  build-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux GCC
+            os: ubuntu-latest
+            cc: gcc
+            cxx: g++
+          - name: Linux Clang
+            os: ubuntu-latest
+            cc: clang
+            cxx: clang++
+          - name: macOS AppleClang
+            os: macos-latest
+            cc: clang
+            cxx: clang++
+          - name: Windows MSVC
+            os: windows-latest
+            cc: ""
+            cxx: ""
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -S . -B build_ci
+          -DWHIRLPOOL_BUILD_TESTS=ON
+          -DWHIRLPOOL_BUILD_BENCHMARKS=OFF
+          -DWHIRLPOOL_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build_ci --config Release --parallel
+
+      - name: Test contracts, package, and functionality
+        run: ctest --test-dir build_ci -C Release --output-on-failure
+
+  sanitizers:
+    name: Linux Clang ASan/UBSan
     runs-on: ubuntu-latest
+    env:
+      CC: clang
+      CXX: clang++
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Configure
-      run: cmake -B build_ci -DBUILD_TESTS=ON -DBUILD_BENCHMARKS=OFF -DCI_BUILD=ON
-    
-    - name: Build
-      run: cmake --build build_ci --config Release
-    
-    - name: Run tests (skip MPMC and Stack)
-      run: |
-        # Run all relevant tests on Linux; explicitly include test groups except MPMC and Stack
-        ./build_ci/tests --gtest_filter="test_pool_*:test_spsc_*:test_ring_buffer_*:test_hashmap_*:test_counter_*:test_rcu_*:test_simple_rcu_*"
+      - uses: actions/checkout@v4
 
-  test-windows:
-    runs-on: windows-latest
-    steps:
-    - uses: actions/checkout@v4
+      - name: Configure
+        run: >
+          cmake -S . -B build_san
+          -DCMAKE_BUILD_TYPE=Debug
+          -DWHIRLPOOL_BUILD_TESTS=ON
+          -DWHIRLPOOL_BUILD_BENCHMARKS=OFF
+          -DWHIRLPOOL_ENABLE_SANITIZERS=address-undefined
 
-    - name: Configure
-      run: cmake -B build_ci -DBUILD_TESTS=ON -DBUILD_BENCHMARKS=OFF -DCI_BUILD=ON
+      - name: Build
+        run: cmake --build build_san --parallel
 
-    - name: Build
-      run: cmake --build build_ci --config Release
+      - name: Run contract checks
+        run: >
+          ctest --test-dir build_san --output-on-failure
+          -R "^contract_"
 
-    - name: Run all tests
-      run: |
-        # Run the full test suite on Windows (includes MPMC and Stack tests)
-        ./build_ci/Release/tests.exe
-
-    
+      - name: Run supported functional groups
+        run: >
+          ./build_san/whirlpool_tests
+          "--gtest_filter=test_pool_*:test_spsc_*:test_ring_buffer_*:test_counter_*"

@@ -1,27 +1,20 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 
-cd "$(dirname "$0")/.."
+project_dir="$(cd "$(dirname "$0")/.." && pwd)"
+build_dir="${project_dir}/build"
 
-if [ ! -f "build/Release/bench_pool.exe" ] && [ ! -f "build/bench_pool" ]; then
-    echo "Building benchmarks..."
-    mkdir -p build
-    cd build
-    cmake .. -DBUILD_BENCHMARKS=ON -DCMAKE_TOOLCHAIN_FILE=C:/Users/user/vcpkg/scripts/buildsystems/vcpkg.cmake
-    cmake --build . --config Release
-    cd ..
+cmake -S "${project_dir}" -B "${build_dir}" \
+    -DWHIRLPOOL_BUILD_TESTS=OFF \
+    -DWHIRLPOOL_BUILD_BENCHMARKS=ON
+cmake --build "${build_dir}" --config Release --parallel
+
+benchmark_dir="${build_dir}"
+if [[ -d "${build_dir}/Release" ]]; then
+    benchmark_dir="${build_dir}/Release"
 fi
 
-echo "Running benchmarks..."
-cd build
-
-if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]]; then
-    ./Release/bench_pool.exe
-    echo ""
-    ./Release/bench_hashmap.exe
-else
-    ./bench_pool
-    echo ""
-    ./bench_hashmap
-fi
+for benchmark_name in pool queue compare hashmap; do
+    "${benchmark_dir}/bench_${benchmark_name}"
+done

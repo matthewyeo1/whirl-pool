@@ -130,8 +130,8 @@ public:
         }
         
         // Clean up any retired nodes
-        for (Node* node : retired_nodes) {
-            delete node;
+        for (Node* retired_node : retired_nodes) {
+            delete retired_node;
         }
         retired_nodes.clear();
         
@@ -255,4 +255,4 @@ thread_local typename TStack<T>::HazardPointer* TStack<T>::local_hp = nullptr;
 
 template<typename T>
 thread_local typename TStack<T>::ThreadHPGuard TStack<T>::hp_guard;
-} 
+}

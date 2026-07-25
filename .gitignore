@@ -1,4 +1,5 @@
 /build/
+/build-bench/
 /build_ci/
 /CMakeFiles/
 /CMakeCache.txt

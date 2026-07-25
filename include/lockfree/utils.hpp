@@ -1,11 +1,12 @@
 #pragma once
 #include <atomic>
 #include <cstddef>
+#include "config.hpp"
 
 namespace lockfree {
 
-// Cache line size (x86-64)
-constexpr size_t CACHE_LINE_SIZE = 64;
+// Backward-compatible name. New code should prefer cache_line_size.
+inline constexpr std::size_t CACHE_LINE_SIZE = cache_line_size;
 
 // Force alignment to cache line to prevent false sharing
 #define LOCKFREE_CACHE_ALIGN alignas(lockfree::CACHE_LINE_SIZE)
@@ -28,4 +29,4 @@ struct padded {
     char padding[CACHE_LINE_SIZE - sizeof(T) % CACHE_LINE_SIZE];
 };
 
-} 
+}

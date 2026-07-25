@@ -53,6 +53,7 @@ Requirements:
 
 - CMake 3.14+
 - A C++17 compiler
+- Google Benchmark, installed through `vcpkg` as described below
 
 ```sh
 cmake -S . -B build -DWHIRLPOOL_BUILD_TESTS=ON
@@ -105,11 +106,92 @@ one minor release.
 
 ## Benchmarks
 
-Google Benchmark must be discoverable when benchmarks are enabled:
+### Install Google Benchmark
+
+On Linux or macOS:
 
 ```sh
-cmake -S . -B build -DWHIRLPOOL_BUILD_BENCHMARKS=ON
-cmake --build build --config Release --parallel
+git clone https://github.com/microsoft/vcpkg.git
+cd vcpkg
+./bootstrap-vcpkg.sh
+./vcpkg install benchmark
+```
+
+On Windows PowerShell:
+
+```powershell
+git clone https://github.com/microsoft/vcpkg.git
+cd vcpkg
+.\bootstrap-vcpkg.bat
+.\vcpkg install benchmark:x64-windows
+```
+
+### Configure and build on Linux or macOS
+
+Set `VCPKG_ROOT` to the absolute path of the cloned vcpkg directory:
+
+```sh
+export VCPKG_ROOT=/absolute/path/to/vcpkg
+
+cmake -S . -B build-bench \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DWHIRLPOOL_BUILD_TESTS=OFF \
+    -DWHIRLPOOL_BUILD_BENCHMARKS=ON \
+    -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+
+cmake --build build-bench --parallel
+```
+
+### Configure and build on Windows
+
+```powershell
+$VcpkgRoot = "C:\absolute\path\to\vcpkg"
+
+cmake -S . -B build-bench `
+    -DWHIRLPOOL_BUILD_TESTS=OFF `
+    -DWHIRLPOOL_BUILD_BENCHMARKS=ON `
+    "-DCMAKE_TOOLCHAIN_FILE=$VcpkgRoot\scripts\buildsystems\vcpkg.cmake"
+
+cmake --build build-bench --config Release --parallel
+```
+
+### Run the benchmarks
+
+The build creates four benchmark executables:
+
+- `bench_pool`
+- `bench_queue`
+- `bench_compare`
+- `bench_hashmap`
+
+Run one benchmark on Linux or macOS:
+
+```sh
+./build-bench/bench_pool
+```
+
+Run one benchmark on Windows:
+
+```powershell
+.\build-bench\Release\bench_pool.exe
+```
+
+Useful Google Benchmark options:
+
+```sh
+# List the benchmarks contained in an executable.
+./build-bench/bench_pool --benchmark_list_tests
+
+# Run benchmark names matching a regular expression.
+./build-bench/bench_pool --benchmark_filter=BM_ObjectPool
+
+# Repeat each selected benchmark five times.
+./build-bench/bench_pool --benchmark_repetitions=5
+
+# Save results as JSON while retaining console output.
+./build-bench/bench_pool \
+    --benchmark_out=benchmark-results.json \
+    --benchmark_out_format=json
 ```
 
 The existing benchmark programs include setup overhead and are preliminary;

@@ -200,7 +200,7 @@ TEST_CASE(test_spsc_size) {
 TEST_CASE(test_spsc_threaded) {
     lockfree::SPSCQueue<int, 1024> queue;
     const int NUM_ITEMS = 10000;
-    std::atomic<int> received{0};
+    int received = 0;
     
     std::thread producer([&]() {
         for (int i = 0; i < NUM_ITEMS; i++) {
@@ -291,7 +291,7 @@ TEST_CASE(test_mpmc_multi_producer_multi_consumer) {
 TEST_CASE(test_mpmc_single_producer_single_consumer) {
     lockfree::MPMCQueue<int> queue;
     const int NUM_ITEMS = 50000;
-    std::atomic<int> received{0};
+    int received = 0;
     
     std::thread producer([&]() {
         for (int i = 0; i < NUM_ITEMS; i++) {
@@ -300,10 +300,10 @@ TEST_CASE(test_mpmc_single_producer_single_consumer) {
     });
     
     std::thread consumer([&]() {
-        while (received.load(std::memory_order_relaxed) < NUM_ITEMS) {
+        while (received < NUM_ITEMS) {
             auto val = queue.pop();
             if (val.has_value()) {
-                received.fetch_add(1, std::memory_order_relaxed);
+                ++received;
             }
         }
     });
@@ -311,7 +311,7 @@ TEST_CASE(test_mpmc_single_producer_single_consumer) {
     producer.join();
     consumer.join();
 
-    ASSERT_EQ(received.load(), NUM_ITEMS);
+    ASSERT_EQ(received, NUM_ITEMS);
     return true;
 }
 
@@ -394,7 +394,7 @@ TEST_CASE(test_stack_basic) {
 TEST_CASE(test_stack_single_producer_single_consumer) {
     lockfree::TStack<int> stack;
     const int NUM_ITEMS = 50000;
-    std::atomic<int> received{0};
+    int received = 0;
     
     std::thread producer([&]() {
         for (int i = 0; i < NUM_ITEMS; i++) {
@@ -403,10 +403,10 @@ TEST_CASE(test_stack_single_producer_single_consumer) {
     });
     
     std::thread consumer([&]() {
-        while (received.load(std::memory_order_relaxed) < NUM_ITEMS) {
+        while (received < NUM_ITEMS) {
             auto val = stack.pop();
             if (val.has_value()) {
-                received.fetch_add(1, std::memory_order_relaxed);
+                ++received;
             }
         }
     });
@@ -414,7 +414,7 @@ TEST_CASE(test_stack_single_producer_single_consumer) {
     producer.join();
     consumer.join();
 
-    ASSERT_EQ(received.load(), NUM_ITEMS);
+    ASSERT_EQ(received, NUM_ITEMS);
     return true;
 }
 

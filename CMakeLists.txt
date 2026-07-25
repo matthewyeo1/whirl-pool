@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(whirlpool VERSION 0.1.0 LANGUAGES CXX)
+project(whirlpool VERSION 0.2.0 LANGUAGES CXX)
 
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
@@ -87,6 +87,15 @@ if(WHIRLPOOL_BUILD_TESTS)
     whirlpool_apply_project_warnings(whirlpool_tests)
     whirlpool_enable_sanitizers(whirlpool_tests)
     add_test(NAME whirlpool_tests COMMAND whirlpool_tests)
+
+    add_executable(whirlpool_foundation_tests
+        tests/foundation/test_foundation.cpp)
+    target_link_libraries(whirlpool_foundation_tests
+        PRIVATE whirlpool::whirlpool)
+    whirlpool_apply_project_warnings(whirlpool_foundation_tests)
+    whirlpool_enable_sanitizers(whirlpool_foundation_tests)
+    add_test(NAME whirlpool_foundation_tests
+        COMMAND whirlpool_foundation_tests)
 
     add_subdirectory(tests/compile)
 

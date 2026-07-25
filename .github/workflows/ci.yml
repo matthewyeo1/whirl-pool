@@ -72,9 +72,36 @@ jobs:
       - name: Run contract checks
         run: >
           ctest --test-dir build_san --output-on-failure
-          -R "^contract_"
+          -R "^(contract_|whirlpool_foundation_tests$)"
 
       - name: Run supported functional groups
         run: >
           ./build_san/whirlpool_tests
           "--gtest_filter=test_pool_*:test_spsc_*:test_ring_buffer_*:test_counter_*"
+
+  thread-sanitizer:
+    name: Linux Clang TSan foundation
+    runs-on: ubuntu-latest
+    env:
+      CC: clang
+      CXX: clang++
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -S . -B build_tsan
+          -DCMAKE_BUILD_TYPE=Debug
+          -DWHIRLPOOL_BUILD_TESTS=ON
+          -DWHIRLPOOL_BUILD_BENCHMARKS=OFF
+          -DWHIRLPOOL_ENABLE_SANITIZERS=thread
+
+      - name: Build foundation tests
+        run: >
+          cmake --build build_tsan --parallel
+          --target whirlpool_foundation_tests
+
+      - name: Run foundation tests
+        run: >
+          ctest --test-dir build_tsan --output-on-failure
+          -R "^whirlpool_foundation_tests$"

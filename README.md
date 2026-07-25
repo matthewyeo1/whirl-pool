@@ -6,16 +6,46 @@ directly through small components in the `lockfree` namespace.
 
 ## Current components
 
+- Cache-aligned wrappers, explicit padding, and layout calculations
+- Fixed-order atomic operations and compiler/hardware barriers
+- Compile-time platform detection and native `cpu_relax`
+- Configurable, allocation-free busy polling and backoff
 - SPSC queue
 - Bounded MPMC ring buffer
 - Object pool
 - MPMC queue and Treiber stack with experimental hazard-pointer reclamation
 - Fixed-capacity hashmap, atomic counter, and experimental RCU variants
 
-The MPMC queue, stack, hashmap, object pool, ring buffer, and RCU variants are
-provisional until the correctness and lifecycle work recorded in
-`PHASE_0_CONTRACTS_AND_AUDIT.md` is complete. Benchmark targets are hypotheses,
-not universal performance guarantees.
+The MPMC queue, stack, hashmap, object pool, ring buffer, and RCU variants
+remain provisional pending separate correctness and lifecycle work. Benchmark
+targets are hypotheses, not universal performance guarantees.
+
+## Low-level foundation
+
+Include the complete public API through `<lockfree.h>`, or include individual
+headers from `lockfree/cache`, `lockfree/sync`, `lockfree/platform`, and
+`lockfree/threading`.
+
+```cpp
+#include <lockfree/cache/cache_aligned.hpp>
+#include <lockfree/sync/atomic.hpp>
+#include <lockfree/threading/busy_poll.hpp>
+
+#include <atomic>
+
+lockfree::CacheAligned<std::atomic<int>> published{};
+lockfree::BusyPoll poll;
+
+lockfree::store_release(published.value, 1);
+const auto status = poll.wait_for_attempts(
+    [&] { return lockfree::load_acquire(published.value) == 1; },
+    1000);
+```
+
+The foundation helpers are C++17, header-only, and allocation-free. Atomic
+helpers expose fixed valid memory-order pairs. Busy polling can pause, yield,
+perform a compiler-only no-op, or adapt from pausing to yielding; it never
+sleeps. Existing cache macros and `padded<T>` remain source-compatible.
 
 ## Build and test
 

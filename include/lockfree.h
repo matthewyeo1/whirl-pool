@@ -1,5 +1,7 @@
 #pragma once
 #include "lockfree/version.hpp"
+#include "lockfree/config.hpp"
+#include "lockfree/error.hpp"
 #include "lockfree/utils.hpp"
 #include "lockfree/spsc_queue.hpp"
 #include "lockfree/pool.hpp"

@@ -6,6 +6,7 @@
 #include <optional>
 #include <atomic>
 #include <cstring>
+#include <memory>
 #include "lockfree.h"
 
 // ============ TEST FRAMEWORK ============
@@ -285,6 +286,67 @@ TEST_CASE(test_mpmc_multi_producer_multi_consumer) {
     for (auto& t : consumers) t.join();
     
     ASSERT_EQ(consumed.load(), TOTAL_ITEMS);
+    return true;
+}
+
+TEST_CASE(test_mpmc_multi_producer_multi_consumer_unique_values) {
+    lockfree::MPMCQueue<int> queue;
+    constexpr int NUM_PRODUCERS = 4;
+    constexpr int NUM_CONSUMERS = 4;
+    constexpr int ITEMS_PER_PRODUCER = 5000;
+    constexpr int TOTAL_ITEMS = NUM_PRODUCERS * ITEMS_PER_PRODUCER;
+
+    auto seen = std::make_unique<std::atomic<int>[]>(TOTAL_ITEMS);
+    for (int i = 0; i < TOTAL_ITEMS; ++i) {
+        seen[i].store(0, std::memory_order_relaxed);
+    }
+
+    std::atomic<int> producers_finished{0};
+    std::atomic<int> consumed{0};
+    std::atomic<bool> invalid_value{false};
+    std::atomic<bool> duplicate_value{false};
+    std::vector<std::thread> producers;
+    std::vector<std::thread> consumers;
+
+    for (int producer = 0; producer < NUM_PRODUCERS; ++producer) {
+        producers.emplace_back([&, producer]() {
+            const int first = producer * ITEMS_PER_PRODUCER;
+            for (int i = 0; i < ITEMS_PER_PRODUCER; ++i) {
+                queue.push(first + i);
+            }
+            producers_finished.fetch_add(1, std::memory_order_release);
+        });
+    }
+
+    for (int consumer = 0; consumer < NUM_CONSUMERS; ++consumer) {
+        consumers.emplace_back([&]() {
+            while (true) {
+                auto value = queue.pop();
+                if (value.has_value()) {
+                    if (*value < 0 || *value >= TOTAL_ITEMS) {
+                        invalid_value.store(true, std::memory_order_relaxed);
+                    } else if (seen[*value].fetch_add(1, std::memory_order_relaxed) != 0) {
+                        duplicate_value.store(true, std::memory_order_relaxed);
+                    }
+                    consumed.fetch_add(1, std::memory_order_relaxed);
+                } else if (producers_finished.load(std::memory_order_acquire) == NUM_PRODUCERS) {
+                    break;
+                } else {
+                    std::this_thread::yield();
+                }
+            }
+        });
+    }
+
+    for (auto& thread : producers) thread.join();
+    for (auto& thread : consumers) thread.join();
+
+    ASSERT_EQ(consumed.load(), TOTAL_ITEMS);
+    ASSERT(!invalid_value.load());
+    ASSERT(!duplicate_value.load());
+    for (int i = 0; i < TOTAL_ITEMS; ++i) {
+        ASSERT_EQ(seen[i].load(), 1);
+    }
     return true;
 }
 

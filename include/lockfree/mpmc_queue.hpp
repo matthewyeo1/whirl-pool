@@ -1,219 +1,262 @@
 #pragma once
-#include <atomic>
-#include <optional>
-#include <memory>
+
 #include <array>
-#include <vector>
-#include <thread>
+#include <atomic>
+#include <memory_resource>
+#include <new>
+#include <optional>
 #include <stdexcept>
+#include <thread>
+#include <utility>
+
 #include "utils.hpp"
 
 namespace lockfree {
 
 /**
- * Michael-Scott Lock-Free MPMC Queue with Hazard Pointers
- * 
- * Multi-Producer Multi-Consumer queue using atomic compare-and-swap.
- * 
- * Reference: Michael & Scott, PODC 1996
+ * Michael-Scott lock-free MPMC queue.
+ *
+ * Nodes removed from the queue are reclaimed with hazard pointers.  Every
+ * operation that dereferences a shared node first publishes that node in a
+ * hazard pointer and validates the source pointer afterwards.
+ *
+ * The queue must not be destroyed while another thread is using it.
  */
 template<typename T>
 class MPMCQueue {
 private:
     struct Node {
-        T data;
-        std::atomic<Node*> next;
-        Node() : next(nullptr) {}
-        Node(const T& value) : data(value), next(nullptr) {}
-        Node(T&& value) : data(std::move(value)), next(nullptr) {}
+        std::optional<T> data;
+        std::atomic<Node*> next{nullptr};
+        std::atomic<Node*> retired_next{nullptr};
+
+        Node() = default;
+
+        template<typename U>
+        explicit Node(U&& value) : data(std::forward<U>(value)) {}
     };
 
     struct HazardPointer {
-        std::atomic<std::thread::id> owner;
-        std::atomic<Node*> pointer;
-        HazardPointer() : owner(std::thread::id()), pointer(nullptr) {}
+        std::atomic<std::thread::id> owner{};
+        std::atomic<Node*> pointer{nullptr};
     };
-    
-    struct ThreadHPGuard {
-        ~ThreadHPGuard() {
-            if (local_hp) {
-                local_hp->pointer.store(nullptr, std::memory_order_release);
-                local_hp->owner.store(std::thread::id(), std::memory_order_release);
-                local_hp = nullptr;
-            }
-            retired_nodes.clear();
-        }
-    };
-    static thread_local ThreadHPGuard hp_guard;
 
-    static constexpr int MAX_HAZARD_POINTERS = 256;
-    static std::array<HazardPointer, MAX_HAZARD_POINTERS> h_ptrs;
-    static thread_local std::vector<Node*> retired_nodes;
-    static thread_local HazardPointer* local_hp;
+    static constexpr size_t MAX_HAZARD_POINTERS = 256;
+    static constexpr size_t RETIRE_SCAN_THRESHOLD = 100;
+
+    class HazardPointerGuard {
+    public:
+        explicit HazardPointerGuard(MPMCQueue& queue) : m_queue(queue) {
+            const std::thread::id id = std::this_thread::get_id();
+            for (auto& hp : m_queue.m_h_ptrs) {
+                std::thread::id expected;
+                if (hp.owner.compare_exchange_strong(expected, id,
+                        std::memory_order_seq_cst, std::memory_order_relaxed)) {
+                    m_hp = &hp;
+                    return;
+                }
+            }
+            throw std::runtime_error("No hazard pointer slot available");
+        }
+
+        HazardPointerGuard(const HazardPointerGuard&) = delete;
+        HazardPointerGuard& operator=(const HazardPointerGuard&) = delete;
+
+        ~HazardPointerGuard() {
+            if (m_hp) {
+                m_hp->pointer.store(nullptr, std::memory_order_seq_cst);
+                m_hp->owner.store(std::thread::id(), std::memory_order_seq_cst);
+            }
+        }
+
+        Node* protect(const std::atomic<Node*>& source) {
+            Node* node;
+            do {
+                node = source.load(std::memory_order_seq_cst);
+                m_hp->pointer.store(node, std::memory_order_seq_cst);
+            } while (node != source.load(std::memory_order_seq_cst));
+            return node;
+        }
+
+    private:
+        MPMCQueue& m_queue;
+        HazardPointer* m_hp{nullptr};
+    };
 
     alignas(CACHE_LINE_SIZE) std::atomic<Node*> m_head;
     alignas(CACHE_LINE_SIZE) std::atomic<Node*> m_tail;
+    std::pmr::memory_resource* const m_memory_resource;
+    mutable std::array<HazardPointer, MAX_HAZARD_POINTERS> m_h_ptrs{};
+    std::atomic<Node*> m_retired{nullptr};
+    std::atomic<size_t> m_retired_count{0};
 
-    static HazardPointer* get_hazard_pointer() {
-        (void)hp_guard;
-        if (local_hp) return local_hp;
-        auto id = std::this_thread::get_id();
-        for (auto& hp : h_ptrs) {
-            std::thread::id expected;
-            if (hp.owner.compare_exchange_strong(expected, id)) {
-                local_hp = &hp;
-                return &hp;
+    bool is_hazard(Node* node) const {
+        // m_tail is allowed to lag after an enqueue.  Do not reclaim its node
+        // until it advances, even when no thread has published a hazard yet.
+        if (m_tail.load(std::memory_order_seq_cst) == node) {
+            return true;
+        }
+        for (const auto& hp : m_h_ptrs) {
+            if (hp.pointer.load(std::memory_order_seq_cst) == node) {
+                return true;
             }
-        }
-        throw std::runtime_error("No hazard pointer slot available");
-    }
-
-    static void release_hazard_pointer(HazardPointer* hp) {
-        if (hp) {
-            hp->pointer.store(nullptr, std::memory_order_release);
-            hp->owner.store(std::thread::id(), std::memory_order_release);
-            if (hp == local_hp) local_hp = nullptr;
-        }
-    }
-
-    bool is_hazard(Node* node) {
-        for (auto& hp : h_ptrs) {
-            if (hp.pointer.load(std::memory_order_acquire) == node) return true;
         }
         return false;
     }
 
-    void retire_node(Node* node) {
-        if (!node) return;
-        retired_nodes.push_back(node);
-        if (retired_nodes.size() >= 100) scan_retired_nodes();
+    void add_to_retired(Node* node, bool count_node) {
+        Node* retired = m_retired.load(std::memory_order_relaxed);
+        do {
+            node->retired_next.store(retired, std::memory_order_relaxed);
+        } while (!m_retired.compare_exchange_weak(retired, node,
+            std::memory_order_release, std::memory_order_relaxed));
+
+        if (count_node) {
+            m_retired_count.fetch_add(1, std::memory_order_relaxed);
+        }
     }
 
     void scan_retired_nodes() {
-        auto it = retired_nodes.begin();
-        while (it != retired_nodes.end()) {
-            if (!is_hazard(*it)) { 
-                delete *it; it = retired_nodes.erase(it); 
+        Node* node = m_retired.exchange(nullptr, std::memory_order_acq_rel);
+        while (node) {
+            Node* next = node->retired_next.load(std::memory_order_relaxed);
+            if (is_hazard(node)) {
+                add_to_retired(node, false);
+            } else {
+                destroy_node(node);
+                m_retired_count.fetch_sub(1, std::memory_order_relaxed);
             }
-            else ++it;
+            node = next;
         }
+    }
+
+    void retire_node(Node* node) {
+        add_to_retired(node, true);
+        if (m_retired_count.load(std::memory_order_relaxed) >= RETIRE_SCAN_THRESHOLD) {
+            scan_retired_nodes();
+        }
+    }
+
+    template<typename... Args>
+    Node* make_node(Args&&... args) {
+        void* memory = m_memory_resource->allocate(sizeof(Node), alignof(Node));
+        try {
+            return ::new (memory) Node(std::forward<Args>(args)...);
+        } catch (...) {
+            m_memory_resource->deallocate(memory, sizeof(Node), alignof(Node));
+            throw;
+        }
+    }
+
+    void destroy_node(Node* node) noexcept {
+        node->~Node();
+        m_memory_resource->deallocate(node, sizeof(Node), alignof(Node));
     }
 
 public:
-    MPMCQueue() {
-        Node* node = new Node();
-        m_head.store(node, std::memory_order_relaxed);
-        m_tail.store(node, std::memory_order_relaxed);
+    explicit MPMCQueue(std::pmr::memory_resource* memory_resource =
+            std::pmr::get_default_resource())
+        : m_memory_resource(memory_resource ? memory_resource :
+            std::pmr::get_default_resource()) {
+        Node* dummy = make_node();
+        m_head.store(dummy, std::memory_order_relaxed);
+        m_tail.store(dummy, std::memory_order_relaxed);
     }
 
     ~MPMCQueue() {
+        // The destructor requires all queue users to have stopped.
         Node* node = m_head.load(std::memory_order_relaxed);
         while (node) {
             Node* next = node->next.load(std::memory_order_relaxed);
-            delete node;
+            destroy_node(node);
             node = next;
         }
-        for (Node* n : retired_nodes) delete n;
-        retired_nodes.clear();
+
+        node = m_retired.exchange(nullptr, std::memory_order_relaxed);
+        while (node) {
+            Node* next = node->retired_next.load(std::memory_order_relaxed);
+            destroy_node(node);
+            node = next;
+        }
     }
 
     MPMCQueue(const MPMCQueue&) = delete;
     MPMCQueue& operator=(const MPMCQueue&) = delete;
 
     void push(const T& value) {
-        Node* node = new Node(value);
-        while (true) {
-            Node* tail = m_tail.load(std::memory_order_acquire);
-            Node* next = tail->next.load(std::memory_order_acquire);
-            if (tail != m_tail.load(std::memory_order_acquire)) continue;
-            if (next != nullptr) {
-                m_tail.compare_exchange_weak(tail, next,
-                    std::memory_order_release, std::memory_order_relaxed);
-                continue;
-            }
-            if (tail->next.compare_exchange_weak(next, node,
-                std::memory_order_release, std::memory_order_relaxed)) {
-                m_tail.compare_exchange_strong(tail, node,
-                    std::memory_order_release, std::memory_order_relaxed);
-                return;
-            }
-        }
+        push_impl(value);
+    }
+
+    void push(T&& value) {
+        push_impl(std::move(value));
+    }
+
+    template<typename... Args>
+    void emplace(Args&&... args) {
+        Node* node = make_node(T(std::forward<Args>(args)...));
+        link_node(node);
     }
 
     std::optional<T> pop() {
-        // Acquire two distinct hazard pointer slots
-        HazardPointer* hp1 = get_hazard_pointer();
-
-        HazardPointer* hp2 = nullptr;
-        auto id = std::this_thread::get_id();
-        for (auto& hp : h_ptrs) {
-            if (&hp == hp1) continue;
-            std::thread::id expected;
-            if (hp.owner.compare_exchange_strong(expected, id)) {
-                hp2 = &hp;
-                break;
-            }
-        }
-        if (!hp2) throw std::runtime_error("No second hazard pointer slot");
-
-        auto cleanup = [&]() {
-            hp1->pointer.store(nullptr, std::memory_order_release);
-            hp2->pointer.store(nullptr, std::memory_order_release);
-            // release hp2 (not cached), leave hp1 as thread's cached slot
-            hp2->owner.store(std::thread::id(), std::memory_order_release);
-        };
+        HazardPointerGuard head_guard(*this);
+        HazardPointerGuard next_guard(*this);
 
         while (true) {
-            Node* head = m_head.load(std::memory_order_acquire);
+            Node* head = head_guard.protect(m_head);
+            Node* next = next_guard.protect(head->next);
 
-            hp1->pointer.store(head, std::memory_order_release);
-
-            if (head != m_head.load(std::memory_order_acquire)) continue;
-
-            Node* next = head->next.load(std::memory_order_acquire);
+            if (head != m_head.load(std::memory_order_seq_cst)) {
+                continue;
+            }
             if (next == nullptr) {
-                cleanup();
                 return std::nullopt;
             }
 
-            hp2->pointer.store(next, std::memory_order_release);
-            // Validate both head and next are still consistent
-            if (head != m_head.load(std::memory_order_acquire) ||
-                next != head->next.load(std::memory_order_acquire)) continue;
-
             if (m_head.compare_exchange_weak(head, next,
-                std::memory_order_release, std::memory_order_relaxed)) {
-                #ifdef __linux__
-                // Verify next is still valid (debug only)
-                volatile char* test = reinterpret_cast<char*>(next);
-                asm volatile("" : : "r"(test) : "memory");  // Touch memory
-                #endif
-                T value = std::move(next->data);
+                    std::memory_order_seq_cst, std::memory_order_seq_cst)) {
+                T value = std::move(*next->data);
                 retire_node(head);
-                cleanup();
                 return value;
             }
         }
     }
 
-    // Check if empty
     bool empty() const {
-        Node* head = m_head.load(std::memory_order_acquire);
-        Node* next = head->next.load(std::memory_order_acquire);
-        return next == nullptr;
+        HazardPointerGuard head_guard(const_cast<MPMCQueue&>(*this));
+        Node* head = head_guard.protect(m_head);
+        return head->next.load(std::memory_order_acquire) == nullptr;
+    }
+
+private:
+    template<typename U>
+    void push_impl(U&& value) {
+        Node* node = make_node(std::forward<U>(value));
+        link_node(node);
+    }
+
+    void link_node(Node* node) {
+        HazardPointerGuard tail_guard(*this);
+
+        while (true) {
+            Node* tail = tail_guard.protect(m_tail);
+            Node* next = tail->next.load(std::memory_order_acquire);
+
+            if (tail != m_tail.load(std::memory_order_seq_cst)) {
+                continue;
+            }
+            if (next != nullptr) {
+                m_tail.compare_exchange_weak(tail, next,
+                    std::memory_order_seq_cst, std::memory_order_seq_cst);
+                continue;
+            }
+            if (tail->next.compare_exchange_weak(next, node,
+                    std::memory_order_seq_cst, std::memory_order_seq_cst)) {
+                m_tail.compare_exchange_strong(tail, node,
+                    std::memory_order_seq_cst, std::memory_order_seq_cst);
+                return;
+            }
+        }
     }
 };
 
-template<typename T>
-std::array<typename MPMCQueue<T>::HazardPointer, MPMCQueue<T>::MAX_HAZARD_POINTERS>
-    MPMCQueue<T>::h_ptrs{};
-
-template<typename T>
-thread_local std::vector<typename MPMCQueue<T>::Node*> MPMCQueue<T>::retired_nodes;
-
-template<typename T>
-thread_local typename MPMCQueue<T>::HazardPointer* MPMCQueue<T>::local_hp = nullptr;
-
-template<typename T>
-thread_local typename MPMCQueue<T>::ThreadHPGuard MPMCQueue<T>::hp_guard;
-} 
+} // namespace lockfree

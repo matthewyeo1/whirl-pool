@@ -65,6 +65,7 @@ Tests default off when Whirl-Pool is included as a subdirectory.
 
 ## Install and consume
 
+In your target environment:
 ```sh
 cmake -S . -B build \
     -DWHIRLPOOL_BUILD_TESTS=OFF \

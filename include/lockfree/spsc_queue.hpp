@@ -15,6 +15,7 @@ namespace lockfree {
 */
 template<typename T, size_t Capacity>
 class SPSCQueue {
+    static_assert(Capacity >= 2, "Capacity must be at least 2");
     static_assert((Capacity & (Capacity - 1)) == 0, "Capacity must be power of 2");
     
 public:

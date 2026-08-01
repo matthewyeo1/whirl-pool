@@ -722,6 +722,35 @@ TEST_CASE(test_hashmap_erase_reinsert) {
     return true;
 }
 
+TEST_CASE(test_hashmap_tombstone_preserves_probe_chain) {
+    // 0, 8, and 16 have the same initial bucket.  Removing the first key must
+    // not make the later colliding keys invisible.
+    lockfree::HashMap<int, int, 8> map;
+
+    ASSERT(map.insert(0, 10));
+    ASSERT(map.insert(8, 20));
+    ASSERT(map.insert(16, 30));
+    ASSERT(map.erase(0));
+
+    auto value = map.find(8);
+    ASSERT(value.has_value());
+    ASSERT_EQ(*value, 20);
+    value = map.find(16);
+    ASSERT(value.has_value());
+    ASSERT_EQ(*value, 30);
+
+    // The tombstone is reusable, but insertion must first search past it so
+    // that an existing key is updated rather than duplicated.
+    ASSERT(map.insert(8, 200));
+    ASSERT_EQ(map.size(), 2);
+    ASSERT_EQ(map.find(8).value(), 200);
+    ASSERT(map.insert(24, 40));
+    ASSERT_EQ(map.size(), 3);
+    ASSERT_EQ(map.find(24).value(), 40);
+
+    return true;
+}
+
 TEST_CASE(test_hashmap_update_value) {
     lockfree::HashMap<int, int, 1024> map;
     
@@ -829,7 +858,9 @@ TEST_CASE(test_hashmap_concurrent_insert_find) {
     const int NUM_THREADS = 4;
     const int OPS_PER_THREAD = 2500;
     std::atomic<bool> start{false};
-    std::atomic<int> errors{0};
+    std::atomic<int> insert_failures{0};
+    std::atomic<int> missing_values{0};
+    std::atomic<int> incorrect_values{0};
     
     std::vector<std::thread> threads;
     
@@ -839,12 +870,17 @@ TEST_CASE(test_hashmap_concurrent_insert_find) {
             
             for (int i = 0; i < OPS_PER_THREAD; i++) {
                 int key = t * OPS_PER_THREAD + i;
-                map.insert(key, key * 10);
+                if (!map.insert(key, key * 10)) {
+                    insert_failures.fetch_add(1, std::memory_order_relaxed);
+                    continue;
+                }
                 
                 // Verify immediately
                 auto val = map.find(key);
-                if (!val.has_value() || *val != key * 10) {
-                    errors++;
+                if (!val.has_value()) {
+                    missing_values.fetch_add(1, std::memory_order_relaxed);
+                } else if (*val != key * 10) {
+                    incorrect_values.fetch_add(1, std::memory_order_relaxed);
                 }
             }
         });
@@ -853,9 +889,45 @@ TEST_CASE(test_hashmap_concurrent_insert_find) {
     start = true;
     for (auto& th : threads) th.join();
     
-    ASSERT_EQ(errors, 0);
+    ASSERT_EQ(insert_failures.load(std::memory_order_relaxed), 0);
+    ASSERT_EQ(missing_values.load(std::memory_order_relaxed), 0);
+    ASSERT_EQ(incorrect_values.load(std::memory_order_relaxed), 0);
     ASSERT_EQ(map.size(), NUM_THREADS * OPS_PER_THREAD);
     
+    return true;
+}
+
+TEST_CASE(test_hashmap_concurrent_same_key_insert) {
+    lockfree::HashMap<int, int, 16> map;
+    constexpr int NUM_THREADS = 8;
+    std::atomic<bool> start{false};
+    std::atomic<int> insert_failures{0};
+    std::vector<std::thread> threads;
+
+    for (int thread_id = 0; thread_id < NUM_THREADS; ++thread_id) {
+        threads.emplace_back([&, thread_id]() {
+            while (!start.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            if (!map.insert(7, thread_id)) {
+                insert_failures.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+    }
+
+    start.store(true, std::memory_order_release);
+    for (auto& thread : threads) {
+        thread.join();
+    }
+
+    // Every writer targets the same key.  The map must update one entry, not
+    // publish several copies in the collision sequence.
+    ASSERT_EQ(insert_failures.load(std::memory_order_relaxed), 0);
+    ASSERT_EQ(map.size(), 1);
+    const auto value = map.find(7);
+    ASSERT(value.has_value());
+    ASSERT(*value >= 0 && *value < NUM_THREADS);
+
     return true;
 }
 

@@ -18,7 +18,7 @@ A header-only library for high-performance, low-latency systems. Built for learn
 - Treiber Stack (lock-free LIFO)
 - Object Pool (lock-free with RAII)
 - Ring Buffer (Vyukov MPMC)
-- HashMap (lock-free, 7.5x faster finds)
+- HashMap (fixed-capacity concurrent map; benchmark results are workload-specific)
 - Atomic Counter (wait-free)
 - RCU (Read-Copy-Update)
 - Google Benchmark integration
@@ -30,7 +30,7 @@ A header-only library for high-performance, low-latency systems. Built for learn
 - Bounded MPMC ring buffer
 - Object pool
 - MPMC queue and Treiber stack with experimental hazard-pointer reclamation
-- Fixed-capacity hashmap, atomic counter, and experimental RCU variants
+- Fixed-capacity concurrent hashmap, atomic counter, and experimental RCU variants
 
 The MPMC queue, stack, hashmap, object pool, ring buffer, and RCU variants are
 provisional until the correctness and lifecycle work recorded in
